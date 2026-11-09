@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DinoZoo</title>
+  <meta name="description" content="Jeu de gestion de zoo de dinosaures, dans le navigateur.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A6%96%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <canvas id="view" aria-label="Vue du parc"></canvas>
+
+    <div id="loading">
+      <div class="logo">Dino<span>Zoo</span></div>
+      <div class="sub">Préparation du parc…</div>
+      <div class="bar"><i></i></div>
+    </div>
+
+    <header id="topbar" class="glass">
+      <div class="brand"><span class="brand-icon">🦖</span><span class="brand-name">Dino<span>Zoo</span></span></div>
+      <div class="stat" id="st-money" data-tip="Argent disponible. Gains totaux : —"><span class="ico">💰</span><span class="val" id="money">0</span><span id="money-delta"></span></div>
+      <div class="stat" id="st-day" data-tip="Jour en cours et heure du parc"><span class="ico">📅</span><span class="val"><b id="day">Jour 1</b><span id="clock">06:00</span></span></div>
+      <div class="stat" id="st-vis" data-tip="Visiteurs dans le parc"><span class="ico">👥</span><span class="val" id="visitors">0</span></div>
+      <div class="stat" id="st-rating" data-tip="Note du parc"><span class="stars" id="stars"><span class="fill" id="stars-fill"></span></span><span class="val" id="rating">2,0</span></div>
+      <div class="stat chip hidden" id="st-event"></div>
+      <div class="spacer"></div>
+      <div class="speed" id="speed" role="group" aria-label="Vitesse">
+        <button data-speed="0" data-tip="Pause (Espace)">⏸</button>
+        <button data-speed="1" data-tip="Vitesse normale (1)">▶</button>
+        <button data-speed="2" data-tip="Vitesse rapide (2)">⏩</button>
+        <button data-speed="3" data-tip="Très rapide (3)">⏭</button>
+      </div>
+      <button class="icon-btn" id="btn-music" data-tip="Musique : activer / couper">🎵</button>
+      <button class="icon-btn" id="btn-sound" data-tip="Couper / activer le son">🔊</button>
+      <button class="icon-btn" id="btn-menu" data-tip="Menu">☰</button>
+    </header>
+
+    <div id="minimap" class="glass"><div class="mm-head"><span>Carte du domaine</span><button id="mm-toggle" class="mm-btn" data-tip="Réduire / agrandir la carte (touche N)">–</button></div><canvas id="mm-canvas"></canvas></div>
+    <aside id="panel" class="glass hidden" aria-live="polite"></aside>
+
+    <nav id="buildbar" class="glass">
+      <div id="tabs" role="tablist"></div>
+      <div id="items"></div>
+    </nav>
+
+    <div id="toolhint" class="glass hidden"></div>
+    <div id="toasts"></div>
+    <div id="summary" class="glass hidden"></div>
+    <div id="tooltip" class="hidden"></div>
+    <div id="modal" class="hidden"><div class="modal-card glass"></div></div>
+    <div id="tutorial" class="glass hidden"></div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/dinos.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/render/textures.js"></script>
+  <script src="js/render/nature.js"></script>
+  <script src="js/render/dinoart.js"></script>
+  <script src="js/render/people.js"></script>
+  <script src="js/render/buildings.js"></script>
+  <script src="js/render/terrain.js"></script>
+  <script src="js/render/renderer.js"></script>
+  <script src="js/r3d/gl.js"></script>
+  <script src="js/r3d/mesh.js"></script>
+  <script src="js/r3d/world3d.js"></script>
+  <script src="js/r3d/models3d.js"></script>
+  <script src="js/r3d/dino3d.js"></script>
+  <script src="js/r3d/renderer3d.js"></script>
+  <script src="js/music.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/save.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/tutorial.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

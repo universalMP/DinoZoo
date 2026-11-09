@@ -1,0 +1,148 @@
+/* =====================================================================
+   DinoZoo — Démarrage et boucle principale.
+   ===================================================================== */
+window.DZ = window.DZ || {};
+(function () {
+  const C = DZ.CONFIG;
+
+  function autoQuality() {
+    const cores = navigator.hardwareConcurrency || 4;
+    const pixels = window.innerWidth * window.innerHeight * Math.pow(Math.min(2, window.devicePixelRatio || 1), 2);
+    if (cores <= 2) return 'low';
+    if (cores <= 4 || pixels > 6e6) return 'medium';
+    return 'high';
+  }
+
+  function boot() {
+    const st = DZ.Save.settings();
+    let quality = st.quality || autoQuality();
+    DZ.R.generateTextures(1234);
+    const game = new DZ.Game();
+    const canvas = document.getElementById('view');
+    // rendu 3D (WebGL 2) par défaut, 2D en secours ou sur demande
+    let renderer = null;
+    const want3D = st.renderer !== '2d';
+    if (want3D && DZ.G && DZ.G.webgl2Available()) {
+      try { renderer = new DZ.G.Renderer3D(canvas, game); } catch (err) { console.warn('Rendu 3D indisponible, passage en 2D', err); renderer = null; }
+    }
+    if (!renderer) renderer = new DZ.R.Renderer(canvas, game);
+    renderer.setQuality(quality);
+    const saved = DZ.Save.load();
+    const resumed = !!(saved && game.load(saved));
+    if (!resumed) game.newGame();
+    if (renderer.is3D) {
+      // vignettes du catalogue rendues en 3D
+      DZ.R.dinoThumb = (id, w, h) => renderer.thumbDino(id, w, h);
+      const thumb2D = DZ.R.buildingThumb;
+      DZ.R.buildingThumb = (type, w, h) => DZ.CONFIG.buildings[type] ? renderer.thumbBuilding(type, w, h) : thumb2D(type, w, h);
+    }
+    const sound = new DZ.Sound();
+    sound.muted = !!st.muted;
+    if (st.vol) Object.assign(sound.vol, st.vol);
+    sound.musicOn = st.musicOn !== false;
+    renderer.onFoot = (x, y, z, size) => sound.footstep(x, y, z, size);
+    document.getElementById('btn-sound').textContent = st.muted ? '🔇' : '🔊';
+    const ui = new DZ.UI(game, renderer, sound);
+    ui.quality = quality;
+    ui.moneyShown = game.s.money;
+    DZ.tutorial.init(game, ui);
+
+    ui.onQuality = (q, manual) => {
+      quality = q;
+      ui.quality = q;
+      renderer.setQuality(q);
+      ui.thumbs = {};
+      ui.buildItems();
+      if (manual) { const s = DZ.Save.settings(); s.quality = q; DZ.Save.setSettings(s); }
+    };
+    ui.onReset = () => {
+      DZ.Save.clear();
+      game.newGame();
+      if (renderer.resetCamera) renderer.resetCamera();
+      else {
+        renderer.cam.x = (C.map.entrance.tileX + 0.5) * C.map.tile;
+        renderer.cam.y = (C.map.h - 6) * C.map.tile;
+        renderer.cam.tz = renderer.cam.zoom = C.camera.startZoom;
+      }
+      renderer.particles.length = 0;
+      game.setSpeed(1); ui.refreshSpeed();
+      DZ.Save.save(game);
+      ui.toast('🦖', 'Nouvelle partie ! Bienvenue dans votre parc.', 'good');
+      DZ.tutorial.start(true);
+    };
+
+    const resize = () => renderer.resize();
+    window.addEventListener('resize', resize);
+    resize();
+
+    // sauvegarde automatique
+    const save = () => DZ.Save.save(game);
+    game.on('hour', save);
+    game.on('dayEnd', save);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+    window.addEventListener('beforeunload', save);
+
+    // boucle
+    let last = performance.now();
+    let fpsT = 0, fpsN = 0, started = performance.now(), audioT = 0;
+    function loop(now) {
+      const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+      last = now;
+      try {
+        game.update(dt);
+        renderer.frame(dt);
+        ui.update(dt);
+        DZ.tutorial.update(dt);
+        // écouteur 3D placé sur la caméra, analyse du lieu
+        if (sound.ctx) {
+          if (renderer.is3D) {
+            const e = renderer.eye, c = renderer.cam;
+            const fx = c.tx - e[0], fy = c.ty - e[1], fz = c.tz - e[2], fl = Math.hypot(fx, fy, fz) || 1;
+            sound.setListener(e[0], e[1], e[2], fx / fl, fy / fl, fz / fl);
+          } else {
+            const T = C.map.tile;
+            sound.setListener(renderer.cam.x / T, 8 / renderer.cam.zoom, renderer.cam.y / T + 2 / renderer.cam.zoom, 0, -0.9, -0.44);
+          }
+          audioT += dt;
+          if (audioT > 0.3) { audioT = 0; sound.analyze(game, renderer); }
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      // baisse automatique de la qualité si le jeu ralentit
+      fpsT += dt; fpsN++;
+      if (fpsT > 3) {
+        const fps = fpsN / fpsT;
+        renderer.fps = fps;
+        fpsT = 0; fpsN = 0;
+        if (!DZ.Save.settings().quality && !document.hidden && now - started > 6000) {
+          if (fps < 38 && quality === 'high') { ui.onQuality('medium'); ui.toast('⚙️', 'Qualité graphique réduite automatiquement pour garder un jeu fluide.', 'info'); }
+          else if (fps < 30 && quality === 'medium') { ui.onQuality('low'); ui.toast('⚙️', 'Qualité graphique réduite automatiquement pour garder un jeu fluide.', 'info'); }
+        }
+      }
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    // affichage
+    setTimeout(() => {
+      document.getElementById('loading').classList.add('done');
+      if (resumed) ui.toast('💾', `Bon retour au parc ! Reprise au jour ${game.s.day}.`, 'good');
+      DZ.tutorial.start(false);
+    }, 250);
+
+    // accès pour le débogage dans la console
+    DZ.app = { game, renderer, ui, sound };
+    const hookMusic = () => { if (sound.music && !sound.music.onTheme) sound.music.onTheme = (title) => ui.toast('🎵', '♪ ' + title, 'music'); };
+    setInterval(hookMusic, 1000);
+    ui.is3D = !!renderer.is3D;
+  }
+
+  window.addEventListener('load', () => {
+    try { boot(); } catch (err) {
+      console.error(err);
+      const l = document.getElementById('loading');
+      if (l) l.querySelector('.sub').textContent = 'Erreur au démarrage : ' + err.message;
+    }
+  });
+})();
