@@ -334,6 +334,7 @@ window.DZ = window.DZ || {};
     for (const dl of s.deliveries) if (dl.enc === B.id) dl.enc = A.id;
     for (const br of s.births) if (br.enc === B.id) br.enc = A.id;
     for (const f of this.fights) if (f.enc === B.id) f.enc = A.id;
+    for (const h of this.hunts) if (h.enc === B.id) h.enc = A.id;
     delete s.buildings[B.id];
     this._rebuildOcc();
     A._accV = -1; A._conV = -1;
@@ -398,7 +399,7 @@ window.DZ = window.DZ || {};
       const riv = this.rivalsIn(b);
       for (const sp in riv) {
         if (b.calm && b.calm[sp] > now) continue;
-        const males = riv[sp].filter((d) => !d.fight && !d.cross && !d.sick && d.state !== 'rest');
+        const males = riv[sp].filter((d) => !d.fight && !d.hunt && !d.cross && !d.sick && d.state !== 'rest');
         if (males.length < 2) continue;
         const terr = DZ.SPECIES[sp].terr;
         const crowd = U.clamp(this.usedSpace(b) / Math.max(1, this.capacity(b)) - 0.6, 0, 0.5) * 2;
@@ -416,8 +417,12 @@ window.DZ = window.DZ || {};
     let B = null, bd = 1e9;
     for (const m of males) if (m !== A) { const dd = Math.hypot(m.x - A.x, m.y - A.y); if (dd < bd) { bd = dd; B = m; } }
     if (!B) return null;
-    const spec = DZ.SPECIES[sp];
-    const len = spec.len || 1.5, sep = len * ({ butt: 0.8, bite: 0.72, tail: 0.78 }[spec.fight] || 0.68);
+    return this._startDuel(b, A, B, false);
+  };
+  /* Duel entre deux dinosaures : deux mâles rivaux, ou deux prédateurs d'espèces différentes. */
+  P._startDuel = function (b, A, B, mixed) {
+    const sp = A.sp, spec = DZ.SPECIES[sp], specB = DZ.SPECIES[B.sp];
+    const len = ((spec.len || 1.5) + (specB.len || 1.5)) / 2, sep = len * ({ butt: 0.8, bite: 0.72, tail: 0.78 }[spec.fight] || 0.68);
     let mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
     const sh = DZ.encShape(b), margin = this.shapeMargin(b, spec) * 0.6 + sep / 2;
     if (DZ.encSDF(b, mx, my, sh) > -margin) {
@@ -429,7 +434,7 @@ window.DZ = window.DZ || {};
     let ux = B.x - A.x, uy = B.y - A.y;
     const ul = Math.hypot(ux, uy);
     if (ul < 0.01) { ux = 1; uy = 0; } else { ux /= ul; uy /= ul; }
-    const f = { enc: b.id, sp, a: A, b: B, phase: 'approach', t: 0, pa: [mx - ux * sep / 2, my - uy * sep / 2], pb: [mx + ux * sep / 2, my + uy * sep / 2], hits: 0 };
+    const f = { enc: b.id, sp, mixed, a: A, b: B, phase: 'approach', t: 0, pa: [mx - ux * sep / 2, my - uy * sep / 2], pb: [mx + ux * sep / 2, my + uy * sep / 2], hits: 0 };
     for (const d of [A, B]) { d.fight = f; d.cross = null; d.crossK = 0; d.run = 0; d.state = 'walk'; d.anim = 0; }
     this.fights.push(f);
     this.emit('fightStart', f);
@@ -495,11 +500,13 @@ window.DZ = window.DZ || {};
 
   P._resolveFight = function (f, b) {
     const s = this.s, F = C.fights, sp = DZ.SPECIES[f.sp];
-    const score = (d) => d.happiness + (d.upCare ? 10 : 0) + (d.upHab ? 5 : 0) + R() * 45;
+    // entre espèces différentes, le plus grand l'emporte presque toujours
+    const score = f.mixed ? (d) => C.dinos[d.sp].space * 25 + d.happiness * 0.3 + R() * 30 : (d) => d.happiness + (d.upCare ? 10 : 0) + (d.upHab ? 5 : 0) + R() * 45;
     const win = score(f.a) >= score(f.b) ? f.a : f.b, lose = win === f.a ? f.b : f.a;
     this._endFight(f);
     b.calm = b.calm || {};
-    b.calm[f.sp] = absHour(s) + F.calmHours;
+    if (f.mixed) { win.sated = absHour(s) + C.predation.duelCalm; lose.sated = win.sated; }
+    else b.calm[f.sp] = absHour(s) + F.calmHours;
     lose.bruise = s.day;
     // le vainqueur rugit, le vaincu bat en retraite
     win.state = 'roar'; win.anim = 0; win.timer = 1.8;
@@ -514,19 +521,21 @@ window.DZ = window.DZ || {};
     }
     // blessures
     let hurt = null;
-    if (R() < F.injury * sp.terr) hurt = lose;
-    else if (R() < F.injury * sp.terr * 0.2) hurt = win;
+    const terr = f.mixed ? 0.9 : sp.terr;
+    if (R() < F.injury * terr) hurt = lose;
+    else if (R() < F.injury * terr * 0.2) hurt = win;
     if (hurt && !hurt.sick) { hurt.sick = true; hurt.injured = 1; hurt.sickDays = 0; }
     else hurt = null;
     // les visiteurs qui regardent n'en perdent pas une miette
     for (const g of this.visitors) if (g.actBuilding === b.id && g.state === 'act') { g.sat = Math.min(100, g.sat + 6); g.mood = 'ravi'; g.bubbleT = 2.5; }
     this._updateHappiness();
     const fem = (d, m, w) => d.sex === 'F' ? w : m;
+    const title = f.mixed ? `Combat entre ${DZ.SPECIES[f.a.sp].name} et ${DZ.SPECIES[f.b.sp].name}` : `Combat de ${sp.name} mâles`;
     if (hurt) {
-      this.notify('🩹', `Combat de ${sp.name} mâles : ${this.who(hurt)} est ${fem(hurt, 'blessé', 'blessée')} ! Soignez-${fem(hurt, 'le', 'la')} (${U.money(this.treatCost(hurt))}) avant ${C.events.sickDaysToDeath} jours.`, 'bad', { type: 'treat', dino: hurt.id });
+      this.notify('🩹', `${title} : ${this.who(hurt)} est ${fem(hurt, 'blessé', 'blessée')} ! Soignez-${fem(hurt, 'le', 'la')} (${U.money(this.treatCost(hurt))}) avant ${C.events.sickDaysToDeath} jours.`, 'bad', { type: 'treat', dino: hurt.id });
     } else if (!b.lastFightNote || absHour(s) - b.lastFightNote > F.noticeHours) {
       b.lastFightNote = absHour(s);
-      this.notify('⚔️', `Combat de ${sp.name} mâles ! ${win.name} l'emporte, ${lose.name} ${fled ? 's\'enfuit par la passerelle' : 'bat en retraite'}.`, 'info', { type: 'select', building: b.id });
+      this.notify('⚔️', `${title} ! ${win.name} l'emporte, ${lose.name} ${fled ? 's\'enfuit par la passerelle' : 'bat en retraite'}.`, 'info', { type: 'select', building: b.id });
     }
     this.emit('fight', { b, win, lose, hurt, fled });
   };
@@ -538,6 +547,216 @@ window.DZ = window.DZ || {};
       d.fight = null; d.fightK = 0; d.look = null;
       if (d.state === 'fight' || d.state === 'roar') { d.state = 'idle'; d.timer = rr(0.5, 1.5); }
       d.moving = 0;
+    }
+  };
+
+  /* ------------------------------------------------------------------
+     Prédation : chasses visibles dans les enclos où un prédateur vit avec
+     d'autres espèces. Le prédateur s'approche, charge, la proie s'enfuit
+     (par une passerelle si elle peut) ; l'issue dépend de la taille.
+     Deux prédateurs d'espèces différentes se disputent le territoire.
+     ------------------------------------------------------------------ */
+  const preySize = (d) => C.dinos[d.sp].space * (d.young ? 0.5 : 1);
+  /* Chance qu'une chasse aboutisse (0 : la proie est trop grande et se défend). */
+  P.huntChance = function (pred, prey) {
+    const K = C.predation.success, ps = C.dinos[pred.sp].space, qs = preySize(prey);
+    let p = qs < ps * 0.75 ? K.smaller : qs <= ps * 1.25 ? K.same : 0;
+    if (prey.young) p = Math.max(p, qs <= ps * 2 ? K.baby : K.bigBaby);
+    if (p > 0 && prey.sick) p = Math.min(0.95, p + C.predation.sickBonus);
+    return p;
+  };
+  /* Pour l'interface : qui chasse qui dans cet enclos. */
+  P.predationInfo = function (b) {
+    const out = [], dinos = this.dinosIn(b), seen = new Set();
+    for (const pred of dinos) {
+      const sp = DZ.SPECIES[pred.sp];
+      if (!sp.predator || pred.young) continue;
+      for (const prey of dinos) {
+        if (prey.sp === pred.sp) continue;
+        const key = pred.sp + '>' + prey.sp + (prey.young ? 'y' : '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const duel = DZ.SPECIES[prey.sp].predator && !prey.young;
+        if (duel && seen.has(prey.sp + '>' + pred.sp)) continue;
+        out.push({ pred: pred.sp, prey: prey.sp, young: !!prey.young, duel, chance: duel ? null : this.huntChance(pred, prey), every: 1 / C.predation.rate });
+      }
+    }
+    return out;
+  };
+
+  P._checkHunts = function (dh) {
+    this._huntAcc = (this._huntAcc || 0) + dh;
+    if (this._huntAcc < 0.2) return;
+    const step = this._huntAcc;
+    this._huntAcc = 0;
+    const s = this.s, K = C.predation, now = absHour(s);
+    if (s.hour < C.time.startHour + 0.3) return;
+    const meal = (s.hour > 9 && s.hour < 10) || (s.hour > 16 && s.hour < 17);
+    for (const id in s.buildings) {
+      const b = s.buildings[id];
+      if (!this.isEnclosure(b) || b.cons) continue;
+      if (this.hunts.some((h) => h.enc === b.id)) continue; // une chasse à la fois par enclos
+      const dinos = this.dinosIn(b);
+      if (!dinos.some((d) => DZ.SPECIES[d.sp].predator)) continue;
+      const free = (d) => !d.fight && !d.hunt && !d.cross;
+      for (const pred of dinos) {
+        const sp = DZ.SPECIES[pred.sp];
+        if (!sp.predator || pred.young || pred.sick || !free(pred) || pred.sated > now) continue;
+        const targets = dinos.filter((o) => o.sp !== pred.sp && free(o));
+        if (!targets.length) continue;
+        const rate = K.rate * (meal ? K.meal : 1) * (pred.happiness < 50 ? 1.3 : 1);
+        if (R() >= rate * step) continue;
+        // il choisit la proie la plus facile, de préférence proche
+        let best = null, bs = -1;
+        for (const o of targets) {
+          const sc = (DZ.SPECIES[o.sp].predator && !o.young ? 0.3 : this.huntChance(pred, o) + 0.08) / (1 + Math.hypot(o.x - pred.x, o.y - pred.y) * 0.08) * (0.7 + R() * 0.6);
+          if (sc > bs) { bs = sc; best = o; }
+        }
+        if (DZ.SPECIES[best.sp].predator && !best.young) { if (sp.habitat === 'land') this._startDuel(b, pred, best, true); }
+        else if (sp.habitat === 'land') this._startHunt(b, pred, best);
+        else this._quickHunt(b, pred, best);
+        break;
+      }
+    }
+  };
+
+  P._startHunt = function (b, pred, prey) {
+    const h = { enc: b.id, pred, prey, phase: 'stalk', t: 0 };
+    pred.hunt = h; pred.state = 'walk'; pred.anim = 0; pred.run = 0;
+    this.hunts.push(h);
+    this.emit('huntStart', h);
+    return h;
+  };
+
+  /* Chasse sous l'eau (lagon) : pas de poursuite à l'écran, l'issue est immédiate. */
+  P._quickHunt = function (b, pred, prey) {
+    const p = this.huntChance(pred, prey);
+    this.emit('splash', prey);
+    if (R() < p) this._kill(b, pred, prey);
+    else pred.sated = absHour(this.s) + C.predation.missHours;
+  };
+
+  P._kill = function (b, pred, prey) {
+    const s = this.s, K = C.predation;
+    s.dinos = s.dinos.filter((x) => x !== prey);
+    for (const f of this.fights.slice()) if (f.a === prey || f.b === prey) this._endFight(f);
+    s.rating = U.clamp(s.rating - K.ratingPenalty, 0, 5);
+    pred.sated = absHour(s) + K.satedHours;
+    // les visiteurs qui regardent : fascinés dans un parc réputé, effrayés sinon
+    const fascinated = s.rating >= 3.5;
+    for (const g of this.visitors) if (g.actBuilding === b.id && g.state === 'act') {
+      g.sat = U.clamp(g.sat + (fascinated ? 3 : -K.watchFear), 0, 100); g.mood = fascinated ? 'ravi' : 'peur'; g.bubbleT = 2.5;
+    }
+    this._updateHappiness();
+    const ps = DZ.SPECIES[pred.sp];
+    this.notify('🦴', `Drame dans l'enclos : ${pred.name}, ${ps.name === 'Tyrannosaurus rex' ? 'le T-Rex' : DZ.leSp(pred.sp)}, a attrapé ${this.who(prey)}. Séparez carnivores et herbivores !`, 'bad', { type: 'select', building: b.id });
+    this.emit('kill', { b, pred, prey });
+    this.emit('dinoRemoved', prey);
+  };
+
+  P._updateHunts = function (dt) {
+    const s = this.s, K = C.predation;
+    for (const h of this.hunts.slice()) {
+      const { pred, prey } = h, b = s.buildings[h.enc];
+      const ok = b && s.dinos.includes(pred) && s.dinos.includes(prey) && pred.enc === h.enc && prey.enc === h.enc && !prey.fight && !(prey.cross && h.phase === 'stalk');
+      if (!ok) { this._endHunt(h); continue; }
+      h.t += dt;
+      const ps = DZ.SPECIES[pred.sp], qs = DZ.SPECIES[prey.sp];
+      const dx = prey.x - pred.x, dy = prey.y - pred.y, dist = Math.hypot(dx, dy) || 0.001;
+      const step = (d, tx, ty, v, spc) => {
+        const ex = tx - d.x, ey = ty - d.y, l = Math.hypot(ex, ey);
+        if (l < 0.03) { d.moving = 0; return true; }
+        const st = Math.min(l, v * dt);
+        d.x += ex / l * st; d.y += ey / l * st;
+        d.gx = tx; d.gy = ty; d.moving = v; d.state = 'walk';
+        if (Math.abs(ex) > 0.02) d.face = ex > 0 ? 1 : -1;
+        d.phase += st * 6.5 / Math.max(0.5, Math.sqrt(C.dinos[spc].space));
+        return false;
+      };
+      const reach = (ps.len || 1.5) * 0.42 + (qs.len || 1.5) * 0.3;
+      if (h.phase === 'stalk') {
+        // approche lente, tête basse
+        step(pred, prey.x, prey.y, ps.speed * 0.55, pred.sp);
+        if (dist < reach + 2.2 || h.t > 7) {
+          h.phase = 'charge'; h.t = 0;
+          pred.anim = 0;
+          this.emit('roar', pred);
+          prey.hunt = h; prey.cross = null; prey.crossK = 0;
+          // fuite par une passerelle si possible
+          for (const l of this.linksOf(b).filter((q) => !q.cons)) {
+            const o = this._crossTarget(prey, b, l);
+            if (o) { prey.hunt = null; this._startCross(prey, l, b, o); prey.run = 1.9; h.escaped = true; break; }
+          }
+          if (h.escaped) { this._missHunt(h, b, 'passerelle'); continue; }
+          h.flee = this._fleePoint(b, prey, pred);
+        }
+      } else if (h.phase === 'charge') {
+        step(pred, prey.x, prey.y, ps.speed * 2.2, pred.sp);
+        pred.run = 2.2;
+        if (step(prey, h.flee.x, h.flee.y, qs.speed * 1.8, prey.sp)) h.flee = this._fleePoint(b, prey, pred);
+        prey.run = 1.8;
+        if (dist < reach) {
+          h.phase = 'strike'; h.t = 0;
+          face(pred, prey);
+          pred.state = 'fight'; prey.state = 'fight'; pred.moving = prey.moving = 0; pred.anim = prey.anim = 0;
+          h.base = [[pred.x, pred.y], [prey.x, prey.y]];
+          this.emit('clash', { x: (pred.x + prey.x) / 2, y: (pred.y + prey.y) / 2, sp: pred.sp, f: h });
+        } else if (h.t > 9) this._missHunt(h, b, 'distancé');
+      } else if (h.phase === 'strike') {
+        // assaut : bond du prédateur, la proie se débat
+        const k = Math.max(0, Math.sin(h.t * 9)), ux = h.base[1][0] - h.base[0][0], uy = h.base[1][1] - h.base[0][1], ul = Math.hypot(ux, uy) || 1;
+        pred.x = h.base[0][0] + ux / ul * k * 0.15; pred.y = h.base[0][1] + uy / ul * k * 0.15;
+        prey.x = h.base[1][0] + Math.sin(h.t * 13) * 0.04; prey.y = h.base[1][1] + Math.cos(h.t * 11) * 0.04;
+        pred.fightK = k; prey.fightK = 1 - k; pred.anim += dt; prey.anim += dt;
+        if (h.t > 1.3) {
+          const p = this.huntChance(pred, prey);
+          if (R() < p) { this._endHunt(h); this._kill(b, pred, prey); pred.state = 'eat'; pred.timer = 6; pred.anim = 0; }
+          else this._missHunt(h, b, p > 0 ? 'échappé' : 'défendu');
+        }
+      }
+    }
+  };
+
+  /* Point de fuite : le plus loin possible du prédateur. */
+  P._fleePoint = function (b, prey, pred) {
+    let best = null, bd = -1;
+    for (let k = 0; k < 8; k++) { const p = this.randomPointIn(b, prey.sp); const dd = Math.hypot(p.x - pred.x, p.y - pred.y); if (dd > bd) { bd = dd; best = p; } }
+    return best;
+  };
+
+  /* Chasse ratée : la proie s'enfuit, ou se défend si elle est plus grande. */
+  P._missHunt = function (h, b, why) {
+    const s = this.s, K = C.predation, { pred, prey } = h, now = absHour(s);
+    this._endHunt(h);
+    pred.sated = now + K.missHours;
+    const fem = (d, m, w) => d.sex === 'F' ? w : m;
+    let text = null, hurt = null;
+    if (why === 'défendu') {
+      // la grande proie charge à son tour : le prédateur peut être blessé
+      const ratio = U.clamp(preySize(prey) / C.dinos[pred.sp].space, 1, 3);
+      if (R() < K.defendInjury * ratio * 0.6 && !pred.sick) { pred.sick = true; pred.injured = 1; pred.sickDays = 0; hurt = pred; }
+      prey.state = 'roar'; prey.anim = 0; prey.timer = 1.8; this.emit('roar', prey);
+      pred.bruise = s.day;
+      const p = this._fleePoint(b, pred, prey); pred.state = 'walk'; pred.gx = p.x; pred.gy = p.y; pred.timer = 0; pred.run = 1.6;
+      text = `${this.who(prey)} a repoussé l'attaque de ${pred.name} !`;
+    } else {
+      if (why !== 'passerelle') { const p = this._fleePoint(b, prey, pred); prey.state = 'walk'; prey.gx = p.x; prey.gy = p.y; prey.timer = 0; prey.run = 1.8; }
+      prey.bruise = s.day;
+      text = why === 'passerelle' ? `${this.who(prey)} a échappé à ${pred.name} en filant par la passerelle !` : `${this.who(prey)} a échappé de justesse à ${pred.name} !`;
+    }
+    this._updateHappiness();
+    if (hurt) this.notify('🩹', `${this.who(prey)} se défend : ${this.who(hurt)} est ${fem(hurt, 'blessé', 'blessée')} ! Soignez-${fem(hurt, 'le', 'la')} (${U.money(this.treatCost(hurt))}) avant ${C.events.sickDaysToDeath} jours.`, 'bad', { type: 'treat', dino: hurt.id });
+    else if (!b.lastHuntNote || now - b.lastHuntNote > K.noticeHours) { b.lastHuntNote = now; this.notify('⚠️', `${text} Séparez carnivores et herbivores.`, 'info', { type: 'select', building: b.id }); }
+    this.emit('huntMiss', { b, pred, prey, why });
+  };
+
+  P._endHunt = function (h) {
+    const i = this.hunts.indexOf(h);
+    if (i >= 0) this.hunts.splice(i, 1);
+    for (const d of [h.pred, h.prey]) if (d.hunt === h) {
+      d.hunt = null; d.fightK = 0; d.look = null; d.moving = 0;
+      if (d.state === 'fight' || d.state === 'walk') { d.state = 'idle'; d.timer = rr(0.4, 1.2); }
+      d.run = 0;
     }
   };
 })();

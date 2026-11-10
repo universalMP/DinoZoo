@@ -232,6 +232,8 @@ window.DZ = window.DZ || {};
   };
   /* Nom affiché d'un bâtiment (un enclos réuni devient « Enclos agrandi »). */
   DZ.bName = (b) => b.parts ? 'Enclos agrandi' : C.buildings[b.type].name;
+  /* « le T-Rex », « l'Allosaurus » : article défini devant un nom d'espèce. */
+  DZ.leSp = (id) => { const n = DZ.SPECIES[id].name; return /^[AEIOUYÉÈH]/i.test(n) ? 'l\'' + n : 'le ' + n; };
   function rrSDF(sh, x, y) {
     const px = x - sh.cx, py = y - sh.cy;
     const qx = Math.abs(px) - (sh.hw - sh.r), qy = Math.abs(py) - (sh.hh - sh.r);
@@ -274,6 +276,7 @@ window.DZ = window.DZ || {};
       this.occ = new Int32Array(W * H);
       this.linkAt = new Int32Array(W * H);
       this.fights = [];
+      this.hunts = [];
       this.visitors = [];
       // Entrée et chemins de départ
       const e = this._addBuilding('entree', ENT.x, ENT.y, 0);
@@ -326,6 +329,7 @@ window.DZ = window.DZ || {};
         this.linkAt = new Int32Array(W * H);
         this._rebuildLinks();
         this.fights = [];
+        this.hunts = [];
         // champs ajoutés au fil des versions
         if (!data.player) data.player = { name: 'Directeur', gender: 'h', avatar: 0, set: false };
         if (!data.deliveries) data.deliveries = [];
@@ -563,6 +567,7 @@ window.DZ = window.DZ || {};
       for (const l of this.linksOf(b)) refund += this._removeLink(l, true);
       refund = Math.round(refund);
       this.fights = this.fights.filter((f) => f.enc !== b.id);
+      this.hunts = this.hunts.filter((h) => h.enc !== b.id);
       this.playerTask(b.x + b.w / 2, b.y + b.h / 2, 'demolish', null);
       delete this.s.buildings[id];
       this._rebuildOcc();
@@ -787,7 +792,7 @@ window.DZ = window.DZ || {};
       this.s.deliveries.push(dl);
       this.emit('deliveryOrdered', dl);
       this.playerTask(cx, cy, 'receive', b.id);
-      if (c.warning) this.notify('⚠️', `Attention : le ${DZ.SPECIES[c.warning.predator].name} risque d'attaquer le ${DZ.SPECIES[c.warning.prey].name} !`, 'bad');
+      if (c.warning) this.notify('⚠️', `Attention : ${DZ.leSp(c.warning.predator)} risque d'attaquer ${DZ.leSp(c.warning.prey)} !`, 'bad');
       return { ok: true, delivery: dl };
     }
 
@@ -1073,12 +1078,13 @@ window.DZ = window.DZ || {};
 
     updateDinos(dt) {
       if (this.fights.length) this._updateFights(dt);
+      if (this.hunts.length) this._updateHunts(dt);
       for (const d of this.s.dinos) {
         const b = this.s.buildings[d.enc];
         if (!b) continue;
         const sp = DZ.SPECIES[d.sp];
         d.t += dt;
-        if (d.fight) continue; // les combats sont animés à part
+        if (d.fight || d.hunt) continue; // combats et chasses sont animés à part
         if (d.cross) { this._updateCrossing(d, b, sp, dt); continue; }
         if (sp.habitat === 'air') this._updateFlyer(d, b, sp, dt);
         else if (sp.habitat === 'water') this._updateSwimmer(d, b, sp, dt);
@@ -1269,6 +1275,7 @@ window.DZ = window.DZ || {};
       this._updateDeliveries(dh);
       this._updateLinkWorks(dh);
       this._checkFights(dh);
+      this._checkHunts(dh);
       if (s.births.length) this._checkBirths(prevHour);
       this._updatePlayer(dt);
       if (Math.floor(prevHour) !== Math.floor(s.hour)) {
@@ -1388,21 +1395,7 @@ window.DZ = window.DZ || {};
         this.notify('🕯️', `${this.who(d)} n'a pas survécu à ${d.injured ? 'ses blessures' : 'sa maladie'}.`, 'bad');
         this.emit('dinoRemoved', d);
       }
-      // conflits entre prédateurs et proies
-      for (const id in s.buildings) {
-        const b = s.buildings[id];
-        if (!this.isEnclosure(b)) continue;
-        const c = this.conflictOf(b);
-        if (c && R() < E.conflictChance) {
-          const victim = this.dinosIn(b).find((d) => d.sp === c.prey);
-          if (victim) {
-            s.dinos = s.dinos.filter((x) => x !== victim);
-            s.rating = U.clamp(s.rating - E.conflictRatingPenalty, 0, 5);
-            this.notify('⚠️', `Drame dans l'enclos : le ${DZ.SPECIES[c.predator].name} a attaqué ${this.who(victim)}. Séparez carnivores et herbivores !`, 'bad', { type: 'select', building: b.id });
-            this.emit('dinoRemoved', victim);
-          }
-        }
-      }
+      // (la prédation se joue pendant la journée : voir les chasses dans habitats.js)
       this._updateHappiness();
       // reproduction et croissance des petits
       this._breed();

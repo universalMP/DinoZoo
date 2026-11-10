@@ -190,6 +190,21 @@ DZ.CONFIG = {
     minShared: 3              // longueur minimale du côté commun
   },
 
+  /* ---------- Prédation (chasses visibles dans les enclos mixtes) ---------- */
+  predation: {
+    rate: 0.1,                // chasses par heure de jeu et par prédateur adulte (une toutes les ~10 h)
+    meal: 1.6,                // plus souvent aux heures des repas
+    success: { smaller: 0.6, same: 0.25, baby: 0.85, bigBaby: 0.3 }, // proie plus petite, de même taille, bébé
+    sickBonus: 0.15,          // une proie malade ou blessée se fait plus facilement attraper
+    satedHours: 6,            // repus après un repas
+    missHours: 1.5,           // reprend son souffle après une chasse ratée
+    duelCalm: 4,              // trêve après un combat entre deux prédateurs d'espèces différentes
+    defendInjury: 0.35,       // une grande proie se défend : risque de blessure du prédateur (× rapport de taille)
+    ratingPenalty: 0.35,      // étoiles perdues par victime
+    watchFear: 5,             // satisfaction perdue par les visiteurs qui regardent (si la note est basse)
+    noticeHours: 6            // notifications des chasses ratées : au plus une par enclos dans cet intervalle
+  },
+
   /* ---------- Combats entre mâles adultes ---------- */
   fights: {
     rate: 0.16,               // combats par heure de jeu, pour une paire de mâles très territoriaux (× tempérament²)
@@ -219,8 +234,6 @@ DZ.CONFIG = {
     criticMax: 0.45,
     naturalSickness: 0.02,
     sickDaysToDeath: 3,
-    conflictChance: 0.45,
-    conflictRatingPenalty: 0.35,
     escapeChance: 0.15,
     escapeRepair: 2500,
     escapeRatingPenalty: 0.3,

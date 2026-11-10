@@ -107,6 +107,7 @@
       game.on('mapChanged', (r) => { this.world.markDirty(r); this._dirtyWorld = true; });
       game.on('reset', () => { this.world.markDirty(null); this._dirtyWorld = true; this._dirtyStatic = true; this.dinoState.clear(); this.world.noise = null; this.world.ridge = null; if (this.far) { G.free(this.gl, this.far.water); G.free(this.gl, this.far.land); this.far = null; } });
       for (const ev of ['built', 'upgraded', 'moved', 'merged', 'linkBuilt', 'linkDone', 'linkRemoved']) game.on(ev, () => { this._dirtyStatic = true; });
+      game.on('kill', (e) => { this.burst3(e.prey.x, e.prey.y, 0.6, 'dust'); });
       game.on('clash', (e) => {
         const big = C.dinos[e.sp].space;
         this.burst3(e.x, e.y, 0.25 + big * 0.03, 'dust');

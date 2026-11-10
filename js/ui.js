@@ -14,6 +14,7 @@ window.DZ = window.DZ || {};
   const pct = (x) => Math.round(x * 100) + ' %';
   /* Durée en heures de jeu → « 35 min » ou « 1 h 20 ». */
   const fmtH = (h) => { const m = Math.max(1, Math.round(h * 60)); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0'); };
+  const capFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
   const SEX = { F: '♀', M: '♂' };
   const TREE_TYPES = ['arbre', 'palmier', 'fougere'];
 
@@ -832,7 +833,7 @@ window.DZ = window.DZ || {};
 
     dinoHover(d) {
       const sp = DZ.SPECIES[d.sp];
-      return `<b>${esc(d.name)} ${SEX[d.sex] || ''}</b> <span class="t-sub">${esc(sp.name)}${d.young ? ' · bébé' : ''}${d.fight ? ' · ⚔️ se bat !' : d.cross ? ' · 🌉 sur la passerelle' : ''}</span><div class="t-grid"><span>Bonheur</span><span>${Math.round(d.happiness)} %</span><span>Attractivité</span><span>${Math.round(this.game.dinoAttraction(d))}</span><span>Nourriture / jour</span><span>${money(C.dinos[d.sp].upkeep * (d.young ? C.breeding.babyUpkeep : 1))}</span><span>Santé</span><span>${d.sick ? (d.injured ? '🩹 Blessé' + (d.sex === 'F' ? 'e' : '') : '🤒 Malade') : '✓ Bonne'}</span></div>`;
+      return `<b>${esc(d.name)} ${SEX[d.sex] || ''}</b> <span class="t-sub">${esc(sp.name)}${d.young ? ' · bébé' : ''}${d.fight ? ' · ⚔️ se bat !' : d.hunt ? (d.hunt.pred === d ? ' · 🍖 chasse !' : ' · 😱 pourchassé !') : d.cross ? ' · 🌉 sur la passerelle' : ''}</span><div class="t-grid"><span>Bonheur</span><span>${Math.round(d.happiness)} %</span><span>Attractivité</span><span>${Math.round(this.game.dinoAttraction(d))}</span><span>Nourriture / jour</span><span>${money(C.dinos[d.sp].upkeep * (d.young ? C.breeding.babyUpkeep : 1))}</span><span>Santé</span><span>${d.sick ? (d.injured ? '🩹 Blessé' + (d.sex === 'F' ? 'e' : '') : '🤒 Malade') : '✓ Bonne'}</span></div>`;
     }
 
     buildingHover(b) {
@@ -911,7 +912,7 @@ window.DZ = window.DZ || {};
       if (sel.kind === 'building') {
         const b = g.buildings[sel.id];
         if (!b) return 'x';
-        const ds = g.dinosIn(b).map((d) => d.id + ':' + d.sick + d.upHab + d.upCare + Math.round(d.happiness) + d.young).join(',');
+        const ds = g.dinosIn(b).map((d) => d.id + ':' + d.sick + d.upHab + d.upCare + Math.round(d.happiness) + d.young + !!d.hunt + !!d.fight).join(',');
         const dl = g.deliveriesTo(b).map((x) => x.id + g.deliveryPhase(x).phase + Math.round(g.deliveryPhase(x).left * 12)).join(',');
         const ls = g.linksOf(b).map((l) => l.id + ':' + Math.round(g.linkProgress(l) * 50)).join(',');
         const rv = g.rivalryInfo(b).map((r) => r.sp + r.n + r.calm).join(',');
@@ -946,8 +947,14 @@ window.DZ = window.DZ || {};
         h += `<span class="k">Entretien / jour</span><span class="v">${money(g.upkeepOf(b))}</span>`;
         if (b.parts) h += `<span class="k">Taille</span><span class="v">${{ S: 'petites espèces', M: 'espèces moyennes', L: 'grandes espèces' }[g.encSize(b)]}</span>`;
         h += '</div>';
-        const c = g.conflictOf(b);
-        if (c) h += `<div class="warn">⚠️ Le ${DZ.SPECIES[c.predator].name} va attaquer le ${DZ.SPECIES[c.prey].name} ! Déplacez l'un d'eux dans un autre enclos (vendez et rachetez).</div>`;
+        const pinfo = g.predationInfo(b);
+        for (const pi of pinfo) {
+          const P = DZ.SPECIES[pi.pred], Q = DZ.SPECIES[pi.prey], every = Math.round(pi.every);
+          if (pi.duel) h += `<div class="warn">⚔️ ${esc(capFirst(DZ.leSp(pi.pred)))} et ${esc(DZ.leSp(pi.prey))} se disputent le territoire : combats réguliers, le plus grand l'emporte.</div>`;
+          else if (pi.chance > 0) h += `<div class="warn">⚠️ ${esc(capFirst(DZ.leSp(pi.pred)))} chasse : ${pi.young ? 'les petits ' + esc(Q.name) : esc(DZ.leSp(pi.prey))} risque${pi.young ? 'nt' : ''} d'être attaqué${pi.young ? 's' : ''} environ toutes les ${every} h (réussite ≈ ${Math.round(pi.chance * 100)} %).</div>`;
+          else h += `<div class="info">🛡️ ${esc(capFirst(DZ.leSp(pi.pred)))} attaque parfois ${esc(DZ.leSp(pi.prey))}, trop grand pour lui : la proie se défend et peut le blesser.</div>`;
+        }
+        if (pinfo.length) h += `<div class="info small">Séparez-les : vendez et rachetez dans un autre enclos. Une passerelle permet aux proies de fuir.</div>`;
         if (b.level === 1 && dinos.some((d) => DZ.SPECIES[d.sp].predator && DZ.SPECIES[d.sp].size === 'L')) h += '<div class="warn">⚠️ Une simple palissade ne retiendra pas longtemps un grand prédateur. Améliorez la clôture pour éviter les évasions.</div>';
         for (const rv of g.rivalryInfo(b)) {
           const sp = DZ.SPECIES[rv.sp];
@@ -960,7 +967,7 @@ window.DZ = window.DZ || {};
         for (const d of dinos) {
           const sp = DZ.SPECIES[d.sp];
           const hp = Math.round(d.happiness);
-          h += `<div class="dino-row" data-act="dino" data-id="${d.id}"><canvas data-thumb="${d.sp}"></canvas><div><div class="n">${esc(d.name)} <span class="sex ${d.sex}">${SEX[d.sex] || ''}</span>${d.young ? ' <span class="baby">bébé</span>' : ''} ${d.sick ? (d.injured ? '🩹' : '🤒') : ''}${d.fight ? ' ⚔️' : ''}${d.cross ? ' 🌉' : ''}</div><div class="s">${esc(sp.short || sp.name)} · ❤ ${hp} % · ★ ${Math.round(g.dinoAttraction(d))}</div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div></div></div>`;
+          h += `<div class="dino-row" data-act="dino" data-id="${d.id}"><canvas data-thumb="${d.sp}"></canvas><div><div class="n">${esc(d.name)} <span class="sex ${d.sex}">${SEX[d.sex] || ''}</span>${d.young ? ' <span class="baby">bébé</span>' : ''} ${d.sick ? (d.injured ? '🩹' : '🤒') : ''}${d.fight ? ' ⚔️' : ''}${d.hunt ? (d.hunt.pred === d ? ' 🍖' : ' 😱') : ''}${d.cross ? ' 🌉' : ''}</div><div class="s">${esc(sp.short || sp.name)} · ❤ ${hp} % · ★ ${Math.round(g.dinoAttraction(d))}</div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div></div></div>`;
         }
         for (const dl of incoming) {
           const sp = DZ.SPECIES[dl.sp], ph = g.deliveryPhase(dl);
@@ -1067,6 +1074,7 @@ window.DZ = window.DZ || {};
       h += `<span class="k">Nourriture / jour</span><span class="v">${money(bal.upkeep * (d.young ? C.breeding.babyUpkeep : 1))}</span><span class="k">${d.young ? 'Né' : 'Arrivé'}${d.sex === 'F' ? 'e' : ''} le</span><span class="v">jour ${d.born}</span></div>`;
       h += `<div class="rows"><span class="k">Bonheur</span><span class="v">${hp} %</span></div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div>`;
       if (sp.social && !g.dinos.some((o) => o !== d && o.enc === d.enc && o.sp === d.sp)) h += '<div class="info">👥 Espèce grégaire : un congénère le rendrait plus heureux.</div>';
+      if (sp.predator) h += `<div class="info">🍖 Prédateur : il chasse les autres espèces de son enclos. Il attrape facilement les plus petites et les bébés ; les plus grandes se défendent.</div>`;
       if (sp.terr >= 0.4 && sp.habitat === 'land') h += `<div class="info">⚔️ Tempérament ${sp.terr >= 0.7 ? 'très territorial' : 'territorial'} : deux mâles adultes dans le même enclos finissent par se battre.</div>`;
       if (d.bruise && s.day - d.bruise <= 1) h += `<div class="info">🤕 ${d.sex === 'F' ? 'Elle' : 'Il'} a perdu un combat récemment et se fait discret${d.sex === 'F' ? 'e' : ''}.</div>`;
       if (d.sick && d.injured) h += `<div class="warn">🩹 Blessé${d.sex === 'F' ? 'e' : ''} dans un combat depuis ${d.sickDays} jour${d.sickDays > 1 ? 's' : ''}. Sans soins, ${d.sex === 'F' ? 'elle' : 'il'} ne survivra pas au-delà de ${C.events.sickDaysToDeath} jours.</div><button class="btn primary wide" data-act="treat" ${s.money < g.treatCost(d) ? 'disabled' : ''}>💉 Soigner <span class="cost">${money(g.treatCost(d))}</span></button>`;
@@ -1286,7 +1294,7 @@ window.DZ = window.DZ || {};
       this.modal(`<h2>Aide</h2>
         <p>Construisez des <b>chemins</b> depuis l'entrée, des <b>enclos</b> reliés aux chemins, puis installez-y des <b>dinosaures</b>. Les visiteurs paient un billet, se promènent, regardent les enclos et dépensent dans les boutiques et restaurants. Gagnez un maximum d'argent pour agrandir le parc !</p>
         <p>Ajoutez des <b>toilettes</b>, des <b>restaurants</b> et des <b>poubelles</b> pour garder des visiteurs satisfaits. La <b>note du parc</b> dépend de leur satisfaction, de la propreté, de la diversité des espèces, de la qualité des enclos et du bien-être des animaux. Elle débloque de nouvelles espèces.</p>
-        <p>⚠️ Les <b>carnivores</b> ne cohabitent qu'avec leur propre espèce. Les grands prédateurs peuvent s'évader d'une simple palissade.</p>
+        <p>⚠️ Les <b>carnivores</b> ne cohabitent qu'avec leur propre espèce : ils chassent les autres (les petites espèces et les bébés surtout ; les grandes se défendent) et se battent avec les autres prédateurs. Les grands prédateurs peuvent s'évader d'une simple palissade.</p>
         <p>🌉 Une <b>passerelle</b> relie deux enclos terrestres face à face (onglet Enclos, ou panneau de l'enclos) : les dinosaures passent de l'un à l'autre, au-dessus des allées. 🔗 Deux enclos terrestres qui se touchent peuvent être <b>réunis</b> en un seul. ⚔️ Deux <b>mâles adultes</b> d'une même espèce finissent par se battre, surtout chez les espèces territoriales : le vaincu peut être blessé ; une passerelle lui permet de s'éloigner.</p>
         <div class="keys">
           <kbd>Clic gauche</kbd> sélectionner / construire · <kbd>Clic droit</kbd> ou <kbd>Échap</kbd> annuler l'outil<br>
@@ -1323,6 +1331,7 @@ window.DZ = window.DZ || {};
       g.on('dinoBorn', (d) => { this.sound.dino(d.sp, this.pos3(d.x, d.y, 0.4), false); });
       g.on('clash', (e) => this.sound.play('clash', { pos: this.pos3(e.x, e.y, 0.5), sp: e.sp }));
       g.on('fight', () => this.sound.crowdReact('ooh'));
+      g.on('kill', () => this.sound.crowdReact(g.s.rating >= 3.5 ? 'ooh' : 'peur'));
       g.on('constructed', (b) => { if (C.buildings[b.type].cat !== 'deco') this.sound.play('upgrade'); });
       g.on('mapChanged', () => { this.mmDirty = true; });
     }
