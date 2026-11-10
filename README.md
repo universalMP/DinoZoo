@@ -37,6 +37,18 @@ Construisez des chemins depuis l'entrée, des enclos reliés à ces chemins, pui
 | Minicarte | clic pour s'y rendre, `N` pour la réduire |
 | Outils | `C` chemin, `V` sélection, `M` déplacer, `X` démolir, `Suppr` démolir la sélection |
 
+Sur tablette et téléphone :
+
+| Action | Geste |
+| --- | --- |
+| Déplacer la vue | glisser un doigt |
+| Zoomer, tourner la carte | deux doigts (écarter / rapprocher, pivoter) |
+| Incliner la caméra (3D) | deux doigts glissés vers le haut ou le bas |
+| Sélectionner | toucher ; appui long pour les informations |
+| Construire | toucher pour l'aperçu, toucher l'aperçu pour confirmer |
+| Remettre le nord en haut | boussole 🧭 |
+| Replier la barre de construction | toucher l'onglet ouvert |
+
 ## Organisation du code
 
 ```

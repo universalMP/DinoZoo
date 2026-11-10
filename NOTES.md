@@ -2,6 +2,17 @@
 
 Décisions prises pendant le développement, là où la demande était ambiguë ou muette.
 
+## Tablette et téléphone
+
+- **Deux doigts, la carte suit les doigts** : écarter ou rapprocher zoome, tourner fait pivoter la carte, glisser déplace, le tout en même temps. Le geste est résolu exactement en 3D : les deux points du sol saisis restent sous les doigts (rotation et position ajustées ensemble, en tenant compte de la perspective) ; le zoom suit l'écart des doigts à l'écran, pour qu'une rotation pure ne zoome pas. Mesuré : pincement sans aucun glissement, rotation à moins d'une demi-case près sous chaque doigt.
+- **Incliner** : deux doigts glissés ensemble vers le haut ou le bas (reconnu dès les premiers pixels : mouvement vertical, écart constant).
+- **Un doigt** déplace la vue ; un toucher sélectionne (seuil de 10 px au doigt, pour ne pas confondre avec un déplacement) ; un **appui long** affiche les informations sans sélectionner. Un geste à deux doigts annule l'action à un doigt commencée, et le doigt restant est ignoré jusqu'au relâchement : plus de construction ou de chemin posé par erreur en zoomant.
+- **Construire au doigt** : un premier toucher montre l'aperçu (vert ou rouge, avec la raison), un toucher ailleurs le déplace, un toucher sur l'aperçu construit. Idem pour déplacer un bâtiment. La décoration se pose directement. Les chemins se tracent en glissant ; un simple toucher en pose un.
+- **Boussole** (3D) : indique le nord ; un toucher remet le nord en haut et redresse la vue.
+- **Mise en page** : barre du haut sur deux lignes au téléphone (étoiles remplacées par « ★ 2,1 », visiteurs masqués sous 400 px), compacte sur tablette ; tout ce qui se place sous la barre du haut ou au-dessus de la barre de construction suit leur hauteur réelle. Au téléphone, la minicarte démarre repliée, l'aide d'outil passe au-dessus de la barre de construction avec un bouton « ✕ Annuler » (au lieu de la touche Échap), et au plus trois notifications s'affichent. Téléphone à l'horizontale : barres réduites. Toucher l'onglet ouvert replie la barre de construction.
+- **Divers** : zoom de la page bloqué pendant les gestes (Safari), cibles tactiles agrandies, pincement sur pavé tactile (Ctrl + molette) plus fin. Souris et clavier inchangés.
+- **Vérifié** en émulation téléphone (375 × 812), tablette (768 × 1024) et téléphone à l'horizontale (812 × 375), avec des gestes simulés.
+
 ## Directeur du parc, chantiers, livraisons et naissances
 
 - **Profil du joueur** : à chaque nouvelle partie (et une fois pour les anciennes sauvegardes), une fenêtre demande le nom, le genre (Femme, Homme, Autre) et l'avatar parmi six tenues : garde forestier·ère, paléontologue, vétérinaire, aventurier·ère, scientifique, pilote. Le genre change la coiffure, la silhouette, le nom de la tenue et le titre (« Directrice », « Directeur », ou aucun titre pour « Autre »). Le jeu est en pause pendant le choix. Un badge en haut à gauche affiche l'avatar et le nom ; un clic centre la vue sur lui. « Recommencer » propose le profil précédent.

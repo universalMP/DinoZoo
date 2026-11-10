@@ -61,6 +61,9 @@ window.DZ = window.DZ || {};
       this.seenUnlocked = new Set();
       this.pointers = new Map();
       this.keys = new Set();
+      // écran tactile (mis à jour à chaque toucher ou clic)
+      this.touch = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+      document.body.classList.toggle('touch', this.touch);
       this.buildTabs();
       this.bindTop();
       this.bindCanvas();
@@ -90,6 +93,25 @@ window.DZ = window.DZ || {};
       chip.addEventListener('click', () => { const p = this.game.pl; if (p) { this.focus(p.x * T, p.y * T); this.sound.play('click'); } });
       this.refreshPlayer();
       this.refreshSpeed();
+      // boussole (3D) : indique le nord ; un toucher remet le nord en haut et redresse la vue
+      if (this.r.rotate) {
+        const cp = el('button', 'glass', '<span class="needle"><b>N</b><i></i></span>');
+        cp.id = 'compass';
+        cp.dataset.tip = 'Remettre le nord en haut. Deux doigts : tourner, zoomer ; deux doigts glissés vers le haut ou le bas : incliner.';
+        cp.addEventListener('click', () => { const c = this.r.cam; c.tyaw = Math.round(c.yaw / U.TAU) * U.TAU; c.pitchOff = 0; this.sound.play('click'); });
+        $('#app').appendChild(cp);
+        this.compass = cp.querySelector('.needle');
+      }
+      // hauteurs des barres, pour placer le reste sans chevauchement
+      const layout = () => {
+        const tb = $('#topbar').getBoundingClientRect(), bb = $('#buildbar').getBoundingClientRect();
+        document.documentElement.style.setProperty('--top-h', Math.round(tb.bottom + 8) + 'px');
+        document.documentElement.style.setProperty('--bb-h', Math.round(innerHeight - bb.top + 8) + 'px');
+      };
+      if (window.ResizeObserver) { const ro = new ResizeObserver(layout); ro.observe($('#topbar')); ro.observe($('#buildbar')); }
+      window.addEventListener('resize', layout);
+      layout();
+      if (innerWidth < 680 || innerHeight < 520) $('#minimap').classList.add('small');
     }
 
     refreshPlayer() {
@@ -212,12 +234,19 @@ window.DZ = window.DZ || {};
        Menu de construction
        ------------------------------------------------------------------ */
     buildTabs() {
+      $('#buildbar').classList.remove('collapsed');
       const tabs = $('#tabs');
       tabs.innerHTML = '';
       for (const t of TABS) {
         const b = el('button', 'tab' + (t.id === this.tab ? ' on' : ''), `<span class="k">${t.icon}</span>${t.name}`);
         b.dataset.tab = t.id;
-        b.addEventListener('click', () => { this.tab = t.id; this.buildTabs(); this.sound.play('click'); });
+        b.addEventListener('click', () => {
+          const bar = $('#buildbar');
+          // toucher l'onglet déjà ouvert replie la barre (plus de place pour la carte)
+          if (t.id === this.tab && !bar.classList.contains('collapsed')) { bar.classList.add('collapsed'); this.sound.play('click'); return; }
+          bar.classList.remove('collapsed');
+          this.tab = t.id; this.buildTabs(); this.sound.play('click');
+        });
         tabs.appendChild(b);
       }
       this.buildItems();
@@ -350,10 +379,20 @@ window.DZ = window.DZ || {};
       }
       else if (t.kind === 'demolish') { text = '🧨 Cliquez sur un bâtiment ou glissez sur des chemins pour démolir'; this.canvas.classList.add('tool-demolish'); }
       else if (t.kind === 'move') { text = t.id ? '✋ Choisissez le nouvel emplacement' : '✋ Choisissez le bâtiment à déplacer'; }
-      if (text) { hint.innerHTML = `${text} <kbd>Échap</kbd> annuler`; hint.classList.remove('hidden'); }
+      this.pending = null;
+      if (t.kind === 'build' && this.touch && C.buildings[t.type].cat !== 'deco') text = `${C.buildings[t.type].icon} Touchez l'endroit voulu pour : ${C.buildings[t.type].name}`;
+      if (this.touch && text) text = text.replace(/Cliquez-glissez/g, 'Glissez le doigt').replace(/Cliquez/g, 'Touchez').replace(/glissez/g, 'glissez le doigt');
+      if (text) this.showHint(text);
       else hint.classList.add('hidden');
       this.refreshItems();
       if (t.kind !== 'select') this.sound.play('click');
+    }
+
+    showHint(text) {
+      const hint = $('#toolhint');
+      hint.innerHTML = `<span>${text}</span>${this.touch ? '' : ' <kbd>Échap</kbd>'}<button class="btn small hint-x" data-cancel aria-label="Annuler l'outil">✕ Annuler</button>`;
+      hint.classList.remove('hidden');
+      hint.querySelector('[data-cancel]').onclick = () => this.setTool({ kind: 'select' });
     }
 
     tileAt(sx, sy) {
@@ -363,6 +402,7 @@ window.DZ = window.DZ || {};
 
     updateGhost(sx, sy) {
       const t = this.tool, g = this.game;
+      if (this.pending) return;
       const p = this.tileAt(sx, sy);
       this.hoverTile = p;
       if (t.kind === 'path') {
@@ -381,6 +421,15 @@ window.DZ = window.DZ || {};
       } else this.r.ghost = null;
     }
 
+    setPending(pp) {
+      const g = this.game;
+      this.pending = pp;
+      const ok = pp.id ? g.canPlace(pp.type, pp.x, pp.y, pp.id, true).ok : g.canPlace(pp.type, pp.x, pp.y).ok;
+      this.r.ghost = { kind: 'building', type: pp.type, x: pp.x, y: pp.y, ok, level: pp.level };
+      this.showHint(ok ? `👆 Touchez l'aperçu pour ${pp.id ? 'le déplacer ici' : 'construire'} · ailleurs pour le déplacer` : `✋ ${esc((pp.id ? g.canPlace(pp.type, pp.x, pp.y, pp.id, true) : g.canPlace(pp.type, pp.x, pp.y)).reason || 'Emplacement impossible')} · touchez ailleurs`);
+      this.sound.play('click');
+    }
+
     applyTool(sx, sy, dragging) {
       const t = this.tool, g = this.game;
       const p = this.tileAt(sx, sy);
@@ -391,7 +440,14 @@ window.DZ = window.DZ || {};
         else if (!dragging && r.reason) this.error(r.reason);
       } else if (t.kind === 'build' && !dragging) {
         const def = C.buildings[t.type];
-        const x = Math.floor(p.wx / T - def.w / 2 + 0.5), y = Math.floor(p.wy / T - def.h / 2 + 0.5);
+        let x = Math.floor(p.wx / T - def.w / 2 + 0.5), y = Math.floor(p.wy / T - def.h / 2 + 0.5);
+        // au doigt : un premier toucher montre l'aperçu, un second sur l'aperçu construit
+        if (this.touch && def.cat !== 'deco') {
+          const pp = this.pending;
+          const inside = pp && pp.type === t.type && p.x >= pp.x - 0.5 && p.x < pp.x + def.w + 0.5 && p.y >= pp.y - 0.5 && p.y < pp.y + def.h + 0.5;
+          if (!inside) { this.setPending({ type: t.type, x, y, level: 1 }); return; }
+          x = pp.x; y = pp.y; this.pending = null;
+        }
         const r = g.build(t.type, x, y);
         if (r.ok) {
           this.sound.play('build');
@@ -415,7 +471,13 @@ window.DZ = window.DZ || {};
           else if (b) this.error('L\'entrée ne peut pas être déplacée');
         } else {
           const def = C.buildings[g.buildings[t.id].type];
-          const x = Math.floor(p.wx / T - def.w / 2 + 0.5), y = Math.floor(p.wy / T - def.h / 2 + 0.5);
+          let x = Math.floor(p.wx / T - def.w / 2 + 0.5), y = Math.floor(p.wy / T - def.h / 2 + 0.5);
+          if (this.touch) {
+            const pp = this.pending;
+            const inside = pp && pp.id === t.id && p.x >= pp.x - 0.5 && p.x < pp.x + def.w + 0.5 && p.y >= pp.y - 0.5 && p.y < pp.y + def.h + 0.5;
+            if (!inside) { this.setPending({ id: t.id, type: g.buildings[t.id].type, x, y, level: g.buildings[t.id].level }); return; }
+            x = pp.x; y = pp.y; this.pending = null;
+          }
           const r = g.moveBuilding(t.id, x, y);
           if (r.ok) { this.sound.play('build'); this.setTool({ kind: 'move' }); }
           else this.error(r.reason);
@@ -450,39 +512,51 @@ window.DZ = window.DZ || {};
     bindCanvas() {
       const cv = this.canvas;
       cv.addEventListener('contextmenu', (e) => e.preventDefault());
+      const touchish = (e) => e.pointerType === 'touch' || e.pointerType === 'pen';
       cv.addEventListener('pointerdown', (e) => {
         this.sound.init();
         try { cv.setPointerCapture(e.pointerId); } catch (err) { /* pointeur non capturable */ }
-        if (e.isPrimary) this.pointers.clear();
-        this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        if (this.pointers.size === 2) { this.pinch = this.pinchDist(); this.drag = null; return; }
+        if (e.isPrimary) { this.pointers.clear(); this.gestureLock = false; }
+        this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
+        this.touch = touchish(e);
+        document.body.classList.toggle('touch', this.touch);
+        clearTimeout(this._longT);
+        // deux doigts : déplacer, zoomer, tourner (et incliner)
+        if (this.pointers.size >= 2) { this.startGesture(); return; }
+        if (this.gestureLock) return;
         const rot = !!this.r.rotate && (e.button === 2 || (e.button === 0 && (e.altKey || e.ctrlKey)));
         const pan = !rot && (e.button === 1 || e.button === 2 || this.keys.has(' '));
-        this.drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, pan, rot, button: e.button, painting: false };
+        this.drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, pan, rot, button: e.button, painting: false, touch: this.touch };
         if (!pan && !rot && e.button === 0 && (this.tool.kind === 'path' || this.tool.kind === 'demolish')) {
           this.drag.painting = true;
-          this.applyTool(e.clientX, e.clientY, false);
-          this.lastPaint = this.tileAt(e.clientX, e.clientY);
+          // au doigt, on attend de voir si un second doigt arrive avant de peindre
+          if (this.touch) this.drag.paintPending = true;
+          else { this.applyTool(e.clientX, e.clientY, false); this.lastPaint = this.tileAt(e.clientX, e.clientY); }
+        }
+        // appui long : informations sur ce qui est sous le doigt
+        if (this.touch && (this.tool.kind === 'select' || this.tool.kind === 'dino')) {
+          this._longT = setTimeout(() => {
+            const d = this.drag;
+            if (d && !d.moved && this.pointers.size === 1) { d.long = true; this.hoverTip(d.x, d.y); if (navigator.vibrate) navigator.vibrate(12); }
+          }, 480);
         }
       });
       cv.addEventListener('pointermove', (e) => {
         const prev = this.pointers.get(e.pointerId);
         if (prev) { prev.x = e.clientX; prev.y = e.clientY; }
-        if (this.pointers.size === 2 && this.pinch) {
-          const d = this.pinchDist();
-          const pts = [...this.pointers.values()];
-          this.r.zoomAt((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2, d / this.pinch);
-          this.pinch = d;
-          return;
-        }
-        this.mouse = { x: e.clientX, y: e.clientY };
+        if (this.gesture) { if (this.pointers.size >= 2) this.moveGesture(); return; }
+        if (this.gestureLock) return;
+        const touch = touchish(e);
+        if (!touch) this.mouse = { x: e.clientX, y: e.clientY };
         const d = this.drag;
         if (d) {
           const dx = e.clientX - d.x, dy = e.clientY - d.y;
-          if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 5) d.moved = true;
+          if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > (d.touch ? 10 : 5)) { if (!d.moved) clearTimeout(this._longT); d.moved = true; }
+          if (d.long) { this.hoverTip(e.clientX, e.clientY); d.x = e.clientX; d.y = e.clientY; return; }
           if (d.rot) {
             if (d.moved) { this.r.rotate(dx, dy); cv.classList.add('rot'); this.hideTip(); }
           } else if (d.painting) {
+            if (d.paintPending) { if (!d.moved) return; d.paintPending = false; const p0 = this.r.screenToWorld(d.sx, d.sy); const s0 = this.r.worldToScreen(p0.x, p0.y); this.applyTool(s0.x, s0.y, false); this.lastPaint = this.tileAt(d.sx, d.sy); }
             const p = this.tileAt(e.clientX, e.clientY);
             if (!this.lastPaint || p.x !== this.lastPaint.x || p.y !== this.lastPaint.y) {
               // remplit les cases intermédiaires (ligne droite)
@@ -490,8 +564,8 @@ window.DZ = window.DZ || {};
               const steps = Math.max(Math.abs(p.x - lp.x), Math.abs(p.y - lp.y));
               for (let i = 1; i <= steps; i++) {
                 const x = Math.round(U.lerp(lp.x, p.x, i / steps)), y = Math.round(U.lerp(lp.y, p.y, i / steps));
-                const s = this.r.worldToScreen((x + 0.5) * T, (y + 0.5) * T);
-                this.applyTool(s.x, s.y, true);
+                const s2 = this.r.worldToScreen((x + 0.5) * T, (y + 0.5) * T);
+                this.applyTool(s2.x, s2.y, true);
               }
               this.lastPaint = p;
             }
@@ -502,30 +576,83 @@ window.DZ = window.DZ || {};
           }
           d.x = e.clientX; d.y = e.clientY;
         }
+        // au doigt, pas de survol : l'aperçu suit les touchers (voir applyTool)
+        if (touch) return;
         this.updateGhost(e.clientX, e.clientY);
         if (!d || !d.moved) this.hoverTip(e.clientX, e.clientY);
       });
       const up = (e) => {
         this.pointers.delete(e.pointerId);
-        if (this.pointers.size < 2) this.pinch = null;
+        clearTimeout(this._longT);
+        if (this.gesture) {
+          if (this.pointers.size < 2) { this.endGesture(); this.gestureLock = this.pointers.size > 0; }
+          return;
+        }
+        if (this.gestureLock) { if (!this.pointers.size) this.gestureLock = false; return; }
         const d = this.drag;
         this.drag = null;
         cv.classList.remove('pan'); cv.classList.remove('rot');
         if (!d) return;
+        if (d.long) { setTimeout(() => this.hideTip(), 1600); return; }
         if (d.button === 2 && !d.moved && this.tool.kind !== 'select') { this.setTool({ kind: 'select' }); return; }
+        if (d.paintPending && !d.moved) { this.applyTool(e.clientX, e.clientY, false); return; }
         if (!d.moved && !d.pan && !d.rot && d.button === 0 && !d.painting) this.applyTool(e.clientX, e.clientY, false);
       };
       cv.addEventListener('pointerup', up);
       cv.addEventListener('pointercancel', up);
-      cv.addEventListener('pointerleave', () => { this.hideTip(); this.r.ghost = this.tool.kind === 'select' ? null : this.r.ghost; });
+      cv.addEventListener('pointerleave', (e) => { if (touchish(e)) return; this.hideTip(); this.r.ghost = this.tool.kind === 'select' ? null : this.r.ghost; });
       cv.addEventListener('wheel', (e) => {
         e.preventDefault();
-        const f = Math.pow(C.camera.zoomStep, -Math.sign(e.deltaY) * Math.min(3, Math.abs(e.deltaY) / 60 + 0.4));
+        // pincement sur pavé tactile (Ctrl + molette) : zoom plus fin
+        const k = e.ctrlKey ? Math.min(3, Math.abs(e.deltaY) / 12) : Math.min(3, Math.abs(e.deltaY) / 60 + 0.4);
+        const f = Math.pow(C.camera.zoomStep, -Math.sign(e.deltaY) * k);
         this.r.zoomAt(e.clientX, e.clientY, f);
       }, { passive: false });
+      // empêche le zoom de la page (Safari) pendant les gestes
+      for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
     }
 
-    pinchDist() { const p = [...this.pointers.values()]; return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1; }
+    /* ---------- Gestes à deux doigts ---------- */
+    gesturePts() {
+      const p = [...this.pointers.values()].slice(0, 2);
+      return { a: p[0], b: p[1], m: { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 }, d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1, ang: Math.atan2(p[1].y - p[0].y, p[1].x - p[0].x) };
+    }
+    startGesture() {
+      // un geste annule l'action à un doigt en cours (pas de construction par erreur)
+      this.drag = null;
+      clearTimeout(this._longT);
+      this.hideTip();
+      for (const p of this.pointers.values()) { p.sx = p.x; p.sy = p.y; }
+      const g = this.gesturePts();
+      this.gesture = { d0: g.d, a0: g.ang, m0: g.m, prevD: g.d, prevM: g.m, mode: null };
+      if (this.r.gestureBegin2) this.r.gestureBegin2(g.a, g.b);
+    }
+    moveGesture() {
+      const G = this.gesture, g = this.gesturePts();
+      if (!G.mode) {
+        const ma = Math.hypot(g.a.x - g.a.sx, g.a.y - g.a.sy), mb = Math.hypot(g.b.x - g.b.sx, g.b.y - g.b.sy);
+        if (Math.max(ma, mb) < 8) return;
+        // deux doigts qui glissent ensemble verticalement : inclinaison
+        const dya = g.a.y - g.a.sy, dyb = g.b.y - g.b.sy, dxa = g.a.x - g.a.sx, dxb = g.b.x - g.b.sx;
+        const vertical = Math.sign(dya) === Math.sign(dyb) && Math.abs(dya) > Math.abs(dxa) * 1.6 && Math.abs(dyb) > Math.abs(dxb) * 1.6;
+        G.mode = this.r.gestureMove2 && vertical && Math.abs(g.d / G.d0 - 1) < 0.1 ? 'tilt' : 'map';
+      }
+      if (this.r.gestureMove2) {
+        if (G.mode === 'tilt') {
+          if (!G.tiltStarted) { G.tiltStarted = true; this.r.gestureBegin(G.m0.x, G.m0.y); }
+          this.r.gestureMove(G.m0.x, G.m0.y, 1, 0, (g.m.y - G.m0.y) * 0.004);
+        } else this.r.gestureMove2({ x: g.a.x, y: g.a.y }, { x: g.b.x, y: g.b.y });
+      } else {
+        // rendu 2D : zoom et déplacement
+        this.r.zoomAt(g.m.x, g.m.y, g.d / G.prevD);
+        this.r.pan(g.m.x - G.prevM.x, g.m.y - G.prevM.y);
+      }
+      G.prevD = g.d; G.prevM = g.m;
+    }
+    endGesture() {
+      this.gesture = null;
+      if (this.r.gestureEnd) this.r.gestureEnd();
+    }
 
     bindKeys() {
       window.addEventListener('keydown', (e) => {
@@ -991,6 +1118,7 @@ window.DZ = window.DZ || {};
           <kbd>Clic gauche</kbd> sélectionner / construire · <kbd>Clic droit</kbd> ou <kbd>Échap</kbd> annuler l'outil<br>
           <kbd>Glisser</kbd> déplacer la vue · <kbd>Molette</kbd> zoomer / dézoomer · <kbd>Flèches</kbd> / <kbd>ZQSD</kbd> / <kbd>WASD</kbd> se déplacer<br>
           ${this.is3D ? '<kbd>Clic droit glissé</kbd> ou <kbd>Ctrl + glisser</kbd> tourner et incliner la caméra · <kbd>[</kbd> <kbd>]</kbd> pivoter · <kbd>Début</kbd> recentrer<br>' : ''}
+          <b>Écran tactile :</b> un doigt pour déplacer la vue · deux doigts pour zoomer et tourner la carte · deux doigts glissés vers le haut ou le bas pour l'incliner · appui long pour les informations · toucher l'onglet ouvert pour replier la barre · 🧭 pour remettre le nord en haut<br>
           <kbd>Espace</kbd> pause · <kbd>1</kbd> vitesse normale · <kbd>2</kbd> rapide · <kbd>3</kbd> très rapide · <kbd>N</kbd> minicarte<br>
           <kbd>C</kbd> chemin · <kbd>V</kbd> sélection · <kbd>M</kbd> déplacer · <kbd>X</kbd> démolir · <kbd>Suppr</kbd> démolir la sélection
         </div><div class="btns"><button class="btn" data-close>Fermer</button></div>`);
@@ -1025,6 +1153,10 @@ window.DZ = window.DZ || {};
 
     update(dt) {
       this.updateKeys(dt);
+      if (this.compass && this.r.project) {
+        const c = this.r.cam, a = this.r.project(c.tx, c.ty, c.tz), b = this.r.project(c.tx, c.ty, c.tz - 4);
+        if (a && b) this.compass.style.transform = `rotate(${Math.atan2(b.x - a.x, a.y - b.y)}rad)`;
+      }
       this.updateTop(dt);
       this.panelT += dt;
       if (this.panelT > 0.4) {

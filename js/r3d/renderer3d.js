@@ -232,6 +232,62 @@
       c.pitchOff = U.clamp(c.pitchOff + dy * 0.004, -0.4, 0.4);
     }
     rotateBy(a) { this.cam.tyaw += a; }
+    /* Geste à deux doigts : le point du sol sous les doigts reste sous les
+       doigts pendant qu'on déplace, zoome, tourne ou incline. */
+    gestureBegin(mx, my) {
+      const c = this.cam;
+      c.dist = c.tdist; c.yaw = c.tyaw; c.anchor = null;
+      this.updateMatrices();
+      this.gest = { dist: c.dist, yaw: c.yaw, pitchOff: c.pitchOff, ty: c.ty, g: this.groundAt(mx, my, c.ty) };
+    }
+    gestureMove(mx, my, scale, rot, tilt) {
+      const c = this.cam, G0 = this.gest;
+      if (!G0) return;
+      c.dist = c.tdist = U.clamp(G0.dist / scale, C.camera.minDist3D, C.camera.maxDist3D);
+      c.yaw = c.tyaw = G0.yaw + rot;
+      c.pitchOff = U.clamp(G0.pitchOff + tilt, -0.4, 0.4);
+      if (!G0.g) return;
+      for (let k = 0; k < 2; k++) {
+        this.updateMatrices();
+        const g = this.groundAt(mx, my, G0.ty);
+        if (!g) break;
+        c.tx += G0.g[0] - g[0]; c.tz += G0.g[1] - g[1];
+      }
+      this.clampCam();
+    }
+    /* Même geste, résolu exactement : les deux points du sol saisis par les
+       doigts restent sous les doigts (échelle, rotation et position ajustées
+       ensemble, ce qui tient compte de la perspective). */
+    gestureBegin2(pa, pb) {
+      const c = this.cam;
+      c.dist = c.tdist; c.yaw = c.tyaw; c.anchor = null;
+      this.updateMatrices();
+      const ty = c.ty, mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
+      this.gest = { dist: c.dist, yaw: c.yaw, pitchOff: c.pitchOff, ty, sd: Math.hypot(pb.x - pa.x, pb.y - pa.y) || 1, ga: this.groundAt(pa.x, pa.y, ty), gb: this.groundAt(pb.x, pb.y, ty), g: this.groundAt(mx, my, ty) };
+    }
+    gestureMove2(pa, pb) {
+      const c = this.cam, G0 = this.gest;
+      if (!G0 || !G0.ga || !G0.gb || !G0.g) return;
+      const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
+      const a0 = Math.atan2(G0.gb[1] - G0.ga[1], G0.gb[0] - G0.ga[0]);
+      for (let it = 0; it < 4; it++) {
+        this.updateMatrices();
+        const ga = this.groundAt(pa.x, pa.y, G0.ty), gb = this.groundAt(pb.x, pb.y, G0.ty);
+        if (!ga || !gb) break;
+        // zoom : selon l'écart des doigts à l'écran (une rotation pure ne zoome pas)
+        c.dist = U.clamp(G0.dist * G0.sd / (Math.hypot(pb.x - pa.x, pb.y - pa.y) || 1), C.camera.minDist3D, C.camera.maxDist3D);
+        let da = Math.atan2(gb[1] - ga[1], gb[0] - ga[0]) - a0;
+        while (da > Math.PI) da -= TAU;
+        while (da < -Math.PI) da += TAU;
+        c.yaw += da;
+        this.updateMatrices();
+        const gm = this.groundAt(mx, my, G0.ty);
+        if (gm) { c.tx += G0.g[0] - gm[0]; c.tz += G0.g[1] - gm[1]; }
+      }
+      c.tdist = c.dist; c.tyaw = c.yaw;
+      this.clampCam();
+    }
+    gestureEnd() { this.gest = null; }
     zoomAt(sx, sy, factor) {
       const c = this.cam;
       c.tdist = U.clamp(c.tdist / factor, C.camera.minDist3D, C.camera.maxDist3D);
