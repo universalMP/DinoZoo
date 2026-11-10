@@ -515,16 +515,20 @@
       const mb = new G.MB(), x0 = -MARGIN, x1 = W + MARGIN, z0 = -MARGIN, z1 = H + MARGIN, F = 900;
       const sea = mb.v.length / 10;
       const add = (x, z) => { const k = mb.vert(x, WATER_Y, z, 0, 1, 0, [0, 0, 0]); mb.v[k * 10 + 9] = 1; return k; };
-      const a = add(x1, z0 - F), b = add(x1 + F, z0 - F), c2 = add(x1 + F, z1 + F), d = add(x1, z1 + F);
+      // la mer s'étend à l'horizon du côté où la disposition l'a placée
+      const west = this.game.layout && this.game.layout.seaSide === 'W';
+      const sx0 = west ? x0 - F : x1, sx1 = west ? x0 : x1 + F;
+      const a = add(sx0, z0 - F), b = add(sx1, z0 - F), c2 = add(sx1, z1 + F), d = add(sx0, z1 + F);
       mb.quad(a, d, c2, b);
       void sea;
       const water = mb.finish();
       const land = new G.MB();
       land.material('ground');
       const skirt = (xa, za, xb, zb, y, col) => land.col(col).face([xa, y, zb], [xb, y, zb], [xb, y, za], [xa, y, za]);
-      skirt(x0 - F, z1, x1, z1 + F, 0.5, [0.2, 0.32, 0.12]);
-      skirt(x0 - F, z0, x0, z1, 0.6, [0.2, 0.32, 0.12]);
-      skirt(x0 - F, z0 - F, x1, z0, 4.5, [0.5, 0.5, 0.5]);
+      const lx0 = west ? x0 : x0 - F, lx1 = west ? x1 + F : x1;
+      skirt(lx0, z1, lx1, z1 + F, 0.5, [0.2, 0.32, 0.12]);
+      if (west) skirt(x1, z0, x1 + F, z1, 0.6, [0.2, 0.32, 0.12]); else skirt(x0 - F, z0, x0, z1, 0.6, [0.2, 0.32, 0.12]);
+      skirt(lx0, z0 - F, lx1, z0, 4.5, [0.5, 0.5, 0.5]);
       return { water, land: land.finish() };
     }
   }

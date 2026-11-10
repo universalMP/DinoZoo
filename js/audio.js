@@ -968,7 +968,11 @@ window.DZ = window.DZ || {};
       const B = DZ.BIOME;
       for (let y = Math.floor(cz - rad); y <= cz + rad; y += 2) for (let x = Math.floor(cx - rad); x <= cx + rad; x += 2) {
         n++;
-        if (x < 0 || y < 0 || x >= W || y >= H) { if (x >= W) sea++; else forest++; continue; }
+        if (x < 0 || y < 0 || x >= W || y >= H) { // hors carte : comme la case du bord la plus proche
+          const ei = U.clamp(y, 0, H - 1) * W + U.clamp(x, 0, W - 1);
+          if (game.terrain[ei] === DZ.TER.WATER && game.biome && game.biome[ei] === B.SEA) sea++; else forest++;
+          continue;
+        }
         const i = y * W + x, b = game.biome ? game.biome[i] : 0, t = game.terrain[i];
         if (t === DZ.TER.WATER) { if (b === B.SEA) sea++; else fresh++; }
         else if (b === B.FOREST || b === B.HILLS) forest++;

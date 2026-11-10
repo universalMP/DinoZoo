@@ -38,61 +38,116 @@ window.DZ = window.DZ || {};
     return d;
   }
 
-  /* Carte : relief (élévation), type de terrain et biome par case. */
-  function generateTerrain(seed) {
+  /* Disposition du domaine. Génération 2 : tirée au hasard à chaque
+     nouvelle partie (côté de la mer, côte et baie, montagnes, massif
+     isolé, lacs, rivière, étangs, côté de la jungle). Génération 1 :
+     disposition d'origine, pour que les anciennes sauvegardes
+     retrouvent exactement leur carte. */
+  function mapLayout(seed, gen) {
+    if (gen < 2) return { flip: false, coast: 0.8, coastWig: 0.14, bay: null, mount: 0.24, massif: null, wetDir: 1, hillCut: 0.6 };
+    const r = U.rng((seed ^ 0x5bd1e995) >>> 0);
+    return {
+      flip: r() < 0.5,
+      coast: 0.72 + r() * 0.13,
+      coastWig: 0.08 + r() * 0.14,
+      bay: r() < 0.55 ? { v: 0.18 + r() * 0.45, depth: 0.05 + r() * 0.08, w: 0.05 + r() * 0.07 } : null,
+      mount: 0.15 + r() * 0.17,
+      massif: r() < 0.6 ? { u: 0.08 + r() * 0.42, v: 0.32 + r() * 0.3, r: 9 + r() * 11 } : null,
+      wetDir: r() < 0.5 ? 1 : -1,
+      hillCut: 0.55 + r() * 0.1,
+      lakes: r() < 0.4 ? 2 : 1,
+      ponds: 2 + Math.floor(r() * 5),
+      r
+    };
+  }
+
+  /* Carte : relief (élévation), type de terrain et biome par case.
+     Calculée dans un repère où la mer est à l'est, puis retournée si la
+     disposition place la mer à l'ouest. */
+  function generateTerrain(seed, gen) {
     const r = U.rng(seed);
+    const L = mapLayout(seed, gen);
     const terr = new Uint8Array(W * H), elev = new Float32Array(W * H), biome = new Uint8Array(W * H), shore = new Float32Array(W * H);
     const big = U.makeFbm(seed + 7, 3, 4), detail = U.makeFbm(seed + 13, 8, 3), moist = U.makeFbm(seed + 21, 3, 3), ridgeN = U.makeFbm(seed + 33, 6, 3);
-    const ex = ENT.tileX, ey = ENT.tileY;
-    // lac à l'ouest, rivière des montagnes au lac puis à la mer
-    const lake = { x: W * (0.2 + r() * 0.05), y: H * (0.48 + r() * 0.06), rx: 11 + r() * 3, ry: 7 + r() * 2 };
-    const coastAt = (v) => W * (0.8 + (big(0.37, v * 0.8) - 0.5) * 0.14 + Math.sin(v * 9 + seed) * 0.012);
-    const mountainAt = (u) => H * (0.24 + (big(u * 0.9, 0.11) - 0.5) * 0.2);
-    const riverIn = [[W * 0.27 + r() * 6, H * 0.06], [W * 0.25 + r() * 6, H * 0.2], [W * 0.22 + r() * 4, H * 0.32], [lake.x + 2, lake.y - lake.ry + 1]];
-    const cy = H * (0.57 + r() * 0.04);
-    const riverOut = [[lake.x + lake.rx - 1, lake.y + 1], [W * 0.36, cy + 4], [W * 0.46, cy - 2], [W * 0.56, cy + 3], [W * 0.66, cy - 3], [coastAt(cy / H) + 3, cy + 1]];
+    const ex = ENT.tileX;
+    const coastAt = (v) => W * (L.coast + (big(0.37, v * 0.8) - 0.5) * L.coastWig + Math.sin(v * 9 + seed) * 0.012 - (L.bay ? L.bay.depth * Math.exp(-Math.pow((v - L.bay.v) / L.bay.w, 2)) : 0));
+    const mountainAt = (u) => H * (L.mount + (big(u * 0.9, 0.11) - 0.5) * 0.2);
+    let lakes, riverIn, riverOut;
     const ponds = [];
-    for (let k = 0; k < 4; k++) ponds.push({ x: W * (0.38 + r() * 0.34), y: H * (0.68 + r() * 0.18), r: 1.6 + r() * 1.8 });
+    if (gen < 2) {
+      // lac à l'ouest, rivière des montagnes au lac puis à la mer
+      const lake = { x: W * (0.2 + r() * 0.05), y: H * (0.48 + r() * 0.06), rx: 11 + r() * 3, ry: 7 + r() * 2 };
+      riverIn = [[W * 0.27 + r() * 6, H * 0.06], [W * 0.25 + r() * 6, H * 0.2], [W * 0.22 + r() * 4, H * 0.32], [lake.x + 2, lake.y - lake.ry + 1]];
+      const cy = H * (0.57 + r() * 0.04);
+      riverOut = [[lake.x + lake.rx - 1, lake.y + 1], [W * 0.36, cy + 4], [W * 0.46, cy - 2], [W * 0.56, cy + 3], [W * 0.66, cy - 3], [coastAt(cy / H) + 3, cy + 1]];
+      for (let k = 0; k < 4; k++) ponds.push({ x: W * (0.38 + r() * 0.34), y: H * (0.68 + r() * 0.18), r: 1.6 + r() * 1.8 });
+      lakes = [lake];
+    } else {
+      const q = L.r, landMax = L.coast - 0.2;
+      const lake = { x: W * (0.1 + q() * (landMax - 0.1)), y: H * (Math.max(L.mount + 0.14, 0.36) + q() * 0.2), rx: 9 + q() * 6, ry: 6 + q() * 3 };
+      lakes = [lake];
+      if (L.lakes > 1) for (let k = 0; k < 20; k++) {
+        const l2 = { x: W * (0.08 + q() * landMax), y: H * (0.3 + q() * 0.42), rx: 5 + q() * 5, ry: 4 + q() * 3 };
+        if (Math.hypot(l2.x - lake.x, l2.y - lake.y) > 34 && !(Math.abs(l2.x - W * 0.5) < 24 && l2.y > H - 36)) { lakes.push(l2); break; }
+      }
+      // rivière : des montagnes au lac, puis en méandres jusqu'à la mer
+      const sx = W * (0.08 + q() * (landMax - 0.08));
+      riverIn = [[sx, H * 0.04]];
+      for (let k = 1; k <= 3; k++) { const t = k / 4; riverIn.push([U.lerp(sx, lake.x, t) + (q() - 0.5) * 12, U.lerp(H * 0.04, lake.y - lake.ry, t)]); }
+      riverIn.push([lake.x + (q() - 0.5) * 4, lake.y - lake.ry + 1]);
+      const cy = U.clamp(lake.y + (q() - 0.3) * H * 0.25, H * 0.3, H * 0.72);
+      const x0 = lake.x + lake.rx - 1, amp = 3 + q() * 5, ph = q() * 6, xe = coastAt(cy / H);
+      riverOut = [[x0, lake.y + 1]];
+      for (let k = 1; k < 6; k++) { const t = k / 6; riverOut.push([U.lerp(x0, xe - 2, t), U.lerp(lake.y + 1, cy, Math.min(1, t * 1.3)) + Math.sin(t * 7 + ph) * amp]); }
+      riverOut.push([xe + 3, cy + 1]);
+      for (let k = 0; k < L.ponds; k++) ponds.push({ x: W * (0.1 + q() * (L.coast - 0.2)), y: H * (0.5 + q() * 0.4), r: 1.6 + q() * 1.8 });
+    }
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = idx(x, y), u = x / W, v = y / H, px = x + 0.5, py = y + 0.5;
+      const i = idx(L.flip ? W - 1 - x : x, y), u = x / W, v = y / H, px = x + 0.5, py = y + 0.5;
       const coast = coastAt(v);
       const dCoast = px - coast;
       const mLine = mountainAt(u);
-      const m = U.clamp((mLine - py) / 14, 0, 1) * (0.55 + big(u * 2.3, 0.7) * 0.7);
+      let m = U.clamp((mLine - py) / 14, 0, 1) * (0.55 + big(u * 2.3, 0.7) * 0.7);
+      if (L.massif) m = Math.max(m, U.clamp(1.15 - Math.hypot(px - L.massif.u * W, py - L.massif.v * H) / L.massif.r, 0, 1) * (0.55 + big(u * 2.3 + 0.5, v) * 0.7));
       const ridge = 1 - Math.abs(ridgeN(u, v) * 2 - 1);
       let e = 0.05 + big(u, v) * 0.32 + (detail(u, v) - 0.5) * 0.08;
-      const hill = Math.max(0, big(u * 1.7 + 0.3, v * 1.7) - 0.6) * 3.2;
+      const hill = Math.max(0, big(u * 1.7 + 0.3, v * 1.7) - L.hillCut) * 3.2;
       e += hill;
       e += m * m * (0.4 + Math.pow(ridge, 2) * 9) + m * 0.5;
       // la côte descend vers la mer
       if (dCoast > -6) e *= U.clamp(-dCoast / 6, 0, 1);
       const dRiver = Math.min(polyDist(px, py, riverIn), polyDist(px, py, riverOut));
-      const dLake = Math.hypot((px - lake.x) / lake.rx, (py - lake.y) / lake.ry) - 1 + (detail(u * 2, v * 2) - 0.5) * 0.35;
-      const zoneEntree = Math.abs(px - (ex + 0.5)) < 16 && py > H - 24;
+      let dLake = 9, dLakeS = 99;
+      for (const lk of lakes) {
+        const dl = Math.hypot((px - lk.x) / lk.rx, (py - lk.y) / lk.ry) - 1 + (detail(u * 2, v * 2) - 0.5) * 0.35;
+        if (dl < dLake) dLake = dl;
+        dLakeS = Math.min(dLakeS, dl * Math.min(lk.rx, lk.ry));
+      }
+      const zoneEntree = Math.abs((L.flip ? W - px : px) - (ex + 0.5)) < 16 && py > H - 24;
       if (zoneEntree) e = Math.min(e, 0.12 + (detail(u, v) - 0.5) * 0.05);
       let t = TER.GRASS, b = BIOME.PLAINS;
       let dPond = 9;
       for (const p of ponds) dPond = Math.min(dPond, Math.hypot(px - p.x, py - p.y) - p.r);
       // vallées : le relief s'abaisse en pente douce vers la rivière et le lac
       e = Math.min(e, 0.12 + Math.max(0, dRiver - 1.2) * 0.32, 0.1 + Math.max(0, dLake) * 4);
-      const wet = moist(u * 1.3, v * 1.3) + (0.5 - u) * 0.22 + Math.max(0, 1 - dRiver / 7) * 0.18 + Math.max(0, 0.5 - dLake) * 0.25;
+      const wet = moist(u * 1.3, v * 1.3) + (0.5 - u) * 0.22 * L.wetDir + Math.max(0, 1 - dRiver / 7) * 0.18 + Math.max(0, 0.5 - dLake) * 0.25;
       if (dCoast > 0) { t = TER.WATER; b = BIOME.SEA; e = -Math.min(1, dCoast / 8); }
       else if (dCoast > -3 - detail(u, v) * 2) { t = TER.SAND; b = BIOME.BEACH; e = Math.min(e, 0.06); }
       else if (!zoneEntree && (dLake < 0 || dRiver < 1.15 || dPond < 0)) { t = TER.WATER; b = BIOME.LAKE; e = 0; }
       else if (!zoneEntree && (dLake < 0.18 || dRiver < 1.9 || dPond < 0.8)) { t = TER.SAND; b = BIOME.BEACH; e = Math.min(e, 0.08); }
       else if (e > 2.2 && m > 0.12) { t = TER.ROCK; b = BIOME.MOUNTAIN; }
       else if (m > 0.12 || e > 0.9) { b = e > 0.7 ? BIOME.HILLS : BIOME.FOREST; if (e > 1.6) t = TER.ROCK; }
-      else if (wet > 0.6 && u < 0.6) b = BIOME.JUNGLE;
+      else if (wet > 0.6 && (L.wetDir > 0 ? u < 0.6 : u > 0.3)) b = BIOME.JUNGLE;
       else if (wet > 0.53) b = BIOME.FOREST;
       else b = BIOME.PLAINS;
       if (zoneEntree && t !== TER.WATER) b = BIOME.PLAINS;
       if (t === TER.GRASS && b === BIOME.PLAINS && detail(u * 1.5, v * 1.5) > 0.66) t = TER.DIRT;
       terr[i] = t; elev[i] = e; biome[i] = b;
       // distance signée à l'eau (négative dans l'eau), plus fine que la grille : rivages arrondis
-      const sdW = Math.min(-dCoast, dRiver - 1.15, dLake * Math.min(lake.rx, lake.ry), dPond);
+      const sdW = Math.min(-dCoast, dRiver - 1.15, dLakeS, dPond);
       shore[i] = zoneEntree ? Math.max(sdW, Math.min(3, -dCoast)) : sdW;
     }
-    return { terr, elev, biome, shore };
+    return { terr, elev, biome, shore, layout: { seaSide: L.flip ? 'W' : 'E' } };
   }
 
   /* Arbres déterministes par case (selon le biome). */
@@ -163,13 +218,13 @@ window.DZ = window.DZ || {};
     newGame(seed) {
       seed = seed || ((Math.random() * 1e9) | 0);
       this.s = {
-        version: 2, seed, day: 1, hour: C.time.startHour,
+        version: 2, seed, mapGen: 2, day: 1, hour: C.time.startHour,
         money: C.economy.startMoney, totalEarned: 0, rating: C.rating.start,
         buildings: {}, nextId: 1, dinos: [], nextDinoId: 1, nameIdx: Math.floor(Math.random() * 40),
         unlocked: {}, lastGrant: -99, history: [], today: null,
         lastSat: 55, weather: null, criticAt: null, escapeAt: null, event: null, totalVisitors: 0
       };
-      this._genMap(seed);
+      this._genMap(seed, 2);
       this.path = new Uint8Array(W * H);
       this.litter = new Uint8Array(W * H);
       this.occ = new Int32Array(W * H);
@@ -187,9 +242,10 @@ window.DZ = window.DZ || {};
       this.emit('reset');
     }
 
-    _genMap(seed) {
-      const map = generateTerrain(seed);
+    _genMap(seed, gen) {
+      const map = generateTerrain(seed, gen || 1);
       this.terrain = map.terr; this.elev = map.elev; this.biome = map.biome; this.shore = map.shore;
+      this.layout = map.layout;
       const tr = generateTrees(seed, map);
       this.trees = tr.trees; this.treeAt = tr.at;
       this.cleared = new Uint8Array(W * H);
@@ -200,7 +256,7 @@ window.DZ = window.DZ || {};
       if (!data || data.version !== 2) return false;
       try {
         this.s = data;
-        this._genMap(data.seed);
+        this._genMap(data.seed, data.mapGen || 1);
         if (data.clearedStr) for (const k of data.clearedStr.split(',')) if (k) this.cleared[parseInt(k, 36)] = 1;
         delete data.clearedStr;
         this.path = new Uint8Array(W * H);

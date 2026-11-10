@@ -103,7 +103,7 @@
       })());
 
       game.on('mapChanged', (r) => { this.world.markDirty(r); this._dirtyWorld = true; });
-      game.on('reset', () => { this.world.markDirty(null); this._dirtyWorld = true; this._dirtyStatic = true; this.dinoState.clear(); this.world.noise = null; this.world.ridge = null; });
+      game.on('reset', () => { this.world.markDirty(null); this._dirtyWorld = true; this._dirtyStatic = true; this.dinoState.clear(); this.world.noise = null; this.world.ridge = null; if (this.far) { G.free(this.gl, this.far.water); G.free(this.gl, this.far.land); this.far = null; } });
       for (const ev of ['built', 'upgraded', 'moved']) game.on(ev, () => { this._dirtyStatic = true; });
       game.on('demolished', (e) => { if (e.building) this._dirtyStatic = true; });
       game.on('spend', (e) => this.coin(e.x, e.y, e.amount));
