@@ -183,21 +183,63 @@ window.DZ = window.DZ || {};
      Forme organique des enclos : rectangle très arrondi et légèrement
      ondulé, inscrit dans l'emprise. Distance signée (négative dedans).
      ------------------------------------------------------------------ */
+  function partShape(def, x, y, w, h, seed, ext) {
+    let hw = w / 2 - 0.12, hh = h / 2 - 0.12;
+    const r = def.kind === 'air' ? Math.min(hw, hh) : Math.min(hw, hh) * (def.kind === 'water' ? 0.75 : 0.55);
+    if (ext) {
+      // partie d'un enclos réuni : prolongée sous ses voisines (pas de clôture entre elles)
+      x -= ext[0]; y -= ext[1]; w += ext[0] + ext[2]; h += ext[1] + ext[3];
+      hw = w / 2 - 0.12; hh = h / 2 - 0.12;
+    }
+    return { cx: x + w / 2, cy: y + h / 2, hw, hh, r, s: (seed % 1000) / 159, amp: def.kind === 'air' ? 0.05 : Math.min(0.3, Math.min(hw, hh) * 0.07) };
+  }
+  /* Emprises d'un enclos : un rectangle, ou plusieurs pour un enclos agrandi. */
+  DZ.encParts = (b) => b.parts || [[b.x, b.y, b.w, b.h]];
   DZ.encShape = function (b) {
     const def = C.buildings[b.type];
-    const hw = b.w / 2 - 0.12, hh = b.h / 2 - 0.12;
-    const r = def.kind === 'air' ? Math.min(hw, hh) : Math.min(hw, hh) * (def.kind === 'water' ? 0.75 : 0.55);
-    return { cx: b.x + b.w / 2, cy: b.y + b.h / 2, hw, hh, r, s: (b.seed % 1000) / 159, amp: def.kind === 'air' ? 0.05 : Math.min(0.3, Math.min(hw, hh) * 0.07) };
+    if (!b.parts) return partShape(def, b.x, b.y, b.w, b.h, b.seed);
+    // enclos réuni : union lissée des formes de chaque partie, bornée par leurs emprises
+    const multi = b.parts.map((p, i) => {
+      const ext = [0, 0, 0, 0];
+      for (const q of b.parts) {
+        if (q === p) continue;
+        const oy = Math.min(p[1] + p[3], q[1] + q[3]) - Math.max(p[1], q[1]), ox = Math.min(p[0] + p[2], q[0] + q[2]) - Math.max(p[0], q[0]);
+        if (oy > 0 && q[0] + q[2] === p[0]) ext[0] = Math.max(ext[0], q[2]);
+        if (oy > 0 && p[0] + p[2] === q[0]) ext[2] = Math.max(ext[2], q[2]);
+        if (ox > 0 && q[1] + q[3] === p[1]) ext[1] = Math.max(ext[1], q[3]);
+        if (ox > 0 && p[1] + p[3] === q[1]) ext[3] = Math.max(ext[3], q[3]);
+      }
+      return partShape(def, p[0], p[1], p[2], p[3], b.seed + i * 337, ext);
+    });
+    let main = multi[0];
+    for (const m of multi) if (m.hw * m.hh > main.hw * main.hh) main = m;
+    return { multi, rects: b.parts, main, cx: main.cx, cy: main.cy, hw: b.w / 2 - 0.12, hh: b.h / 2 - 0.12, r: main.r };
   };
+  const smin = (a, b, k) => { const h = U.clamp(0.5 + 0.5 * (b - a) / k, 0, 1); return b + (a - b) * h - k * h * (1 - h); };
   DZ.encSDF = function (b, x, y, sh) {
     sh = sh || DZ.encShape(b);
+    if (sh.multi) {
+      let d = rrSDF(sh.multi[0], x, y), box = 1e9;
+      for (let i = 1; i < sh.multi.length; i++) d = smin(d, rrSDF(sh.multi[i], x, y), 0.8);
+      // le lissage ne déborde jamais des emprises (coins rentrants)
+      for (const r of sh.rects) {
+        const qx = Math.abs(x - (r[0] + r[2] / 2)) - r[2] / 2, qy = Math.abs(y - (r[1] + r[3] / 2)) - r[3] / 2;
+        box = Math.min(box, Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0));
+      }
+      return box > 0 ? Math.max(d, box) : d;
+    }
+    return rrSDF(sh, x, y);
+  };
+  /* Nom affiché d'un bâtiment (un enclos réuni devient « Enclos agrandi »). */
+  DZ.bName = (b) => b.parts ? 'Enclos agrandi' : C.buildings[b.type].name;
+  function rrSDF(sh, x, y) {
     const px = x - sh.cx, py = y - sh.cy;
     const qx = Math.abs(px) - (sh.hw - sh.r), qy = Math.abs(py) - (sh.hh - sh.r);
     let d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - sh.r;
     const a = Math.atan2(py / sh.hh, px / sh.hw);
     d += sh.amp * (Math.sin(a * 3 + sh.s) * 0.6 + Math.sin(a * 5 + sh.s * 2.3) * 0.4);
     return d;
-  };
+  }
 
   /* ------------------------------------------------------------------
      Jeu
@@ -220,7 +262,7 @@ window.DZ = window.DZ || {};
       this.s = {
         version: 2, seed, mapGen: 2, day: 1, hour: C.time.startHour,
         player: Object.assign({ name: 'Directeur', gender: 'h', avatar: 0, set: false }, player || {}),
-        deliveries: [], nextDel: 1, births: [],
+        deliveries: [], nextDel: 1, births: [], links: {}, nextLink: 1,
         money: C.economy.startMoney, totalEarned: 0, rating: C.rating.start,
         buildings: {}, nextId: 1, dinos: [], nextDinoId: 1, nameIdx: Math.floor(Math.random() * 40),
         unlocked: {}, lastGrant: -99, history: [], today: null,
@@ -230,6 +272,8 @@ window.DZ = window.DZ || {};
       this.path = new Uint8Array(W * H);
       this.litter = new Uint8Array(W * H);
       this.occ = new Int32Array(W * H);
+      this.linkAt = new Int32Array(W * H);
+      this.fights = [];
       this.visitors = [];
       // Entrée et chemins de départ
       const e = this._addBuilding('entree', ENT.x, ENT.y, 0);
@@ -277,12 +321,17 @@ window.DZ = window.DZ || {};
         delete data.pathStr; delete data.litterStr;
         this.occ = new Int32Array(W * H);
         this._rebuildOcc();
+        if (!data.links) data.links = {};
+        if (!data.nextLink) data.nextLink = 1;
+        this.linkAt = new Int32Array(W * H);
+        this._rebuildLinks();
+        this.fights = [];
         // champs ajoutés au fil des versions
         if (!data.player) data.player = { name: 'Directeur', gender: 'h', avatar: 0, set: false };
         if (!data.deliveries) data.deliveries = [];
         if (!data.nextDel) data.nextDel = 1;
         if (!data.births) data.births = [];
-        for (const d of this.s.dinos) { if (!d.sex) d.sex = d.id % 2 ? 'M' : 'F'; this._initDinoTransient(d); }
+        for (const d of this.s.dinos) { if (!d.sex) d.sex = d.id % 2 ? 'M' : 'F'; this._initDinoTransient(d); const b = this.s.buildings[d.enc]; if (b) this.keepInside(d, b, DZ.SPECIES[d.sp]); }
         this._initPlayer();
         this.visitors = [];
         this._netChanged();
@@ -303,17 +352,19 @@ window.DZ = window.DZ || {};
       const dinos = s.dinos.map((d) => ({
         id: d.id, sp: d.sp, enc: d.enc, name: d.name, x: d.x, y: d.y, face: d.face,
         upHab: d.upHab, upCare: d.upCare, sick: d.sick, sickDays: d.sickDays, happiness: d.happiness, born: d.born,
-        sex: d.sex, young: d.young ? 1 : 0
+        sex: d.sex, young: d.young ? 1 : 0, injured: d.injured ? 1 : 0, bruise: d.bruise
       }));
       if (this.pl) { s.player.x = Math.round(this.pl.x * 100) / 100; s.player.y = Math.round(this.pl.y * 100) / 100; }
       const buildings = {};
       for (const id in s.buildings) {
         const b = s.buildings[id];
-        buildings[id] = { id: b.id, type: b.type, x: b.x, y: b.y, w: b.w, h: b.h, level: b.level, invested: b.invested, seed: b.seed, fixed: b.fixed, built: b.built, earned: Math.round(b.earned || 0), cons: b.cons, upg: b.upg, breed: b.breed };
+        buildings[id] = { id: b.id, type: b.type, x: b.x, y: b.y, w: b.w, h: b.h, level: b.level, invested: b.invested, seed: b.seed, fixed: b.fixed, built: b.built, earned: Math.round(b.earned || 0), cons: b.cons, upg: b.upg, breed: b.breed, parts: b.parts, space: b.space, size: b.size, calm: b.calm };
       }
       const cl = [];
       for (let i = 0; i < W * H; i++) if (this.cleared[i] && this.treeAt[i]) cl.push(i.toString(36));
-      return Object.assign({}, s, { dinos, buildings, pathStr, litterStr, clearedStr: cl.join(','), weather: s.weather });
+      const links = {};
+      for (const id in s.links) { const l = s.links[id]; links[id] = { id: l.id, a: l.a, b: l.b, x: l.x, y: l.y, w: l.w, h: l.h, dir: l.dir, len: l.len, invested: l.invested, cons: l.cons }; }
+      return Object.assign({}, s, { dinos, buildings, links, pathStr, litterStr, clearedStr: cl.join(','), weather: s.weather });
     }
 
     /* ---------- Accès à la carte ---------- */
@@ -327,7 +378,7 @@ window.DZ = window.DZ || {};
       this.occ.fill(0);
       for (const id in this.s.buildings) {
         const b = this.s.buildings[id];
-        for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) this.occ[idx(x, y)] = b.id;
+        for (const [px, py, pw, ph] of DZ.encParts(b)) for (let y = py; y < py + ph; y++) for (let x = px; x < px + pw; x++) this.occ[idx(x, y)] = b.id;
       }
     }
 
@@ -404,6 +455,7 @@ window.DZ = window.DZ || {};
         if (t === TER.ROCK) return { ok: false, reason: 'Terrain rocheux' };
         if (this.occ[k] && this.occ[k] !== ignoreId) return { ok: false, reason: 'Emplacement occupé' };
         if (this.path[k]) return { ok: false, reason: 'Un chemin passe ici' };
+        if (this.linkAt[k]) return { ok: false, reason: 'Une passerelle passe ici' };
       }
       if (!free && this.s.money < def.cost) return { ok: false, reason: 'Fonds insuffisants' };
       return { ok: true };
@@ -452,14 +504,20 @@ window.DZ = window.DZ || {};
         if (b.cons) {
           delete b.cons;
           b._conV = -1;
-          if (def.cat !== 'deco') this.notify('✅', `Construction terminée : ${def.name}.`, 'good', { type: 'select', building: b.id });
+          if (def.cat !== 'deco') this.notify('✅', `Construction terminée : ${DZ.bName(b)}.`, 'good', { type: 'select', building: b.id });
           this.emit('constructed', b);
+          this.emit('mapChanged', region);
+        } else if (b.upg.merge) {
+          delete b.upg;
+          this._updateHappiness();
+          this.notify('🔗', `Travaux terminés : les enclos sont réunis. Place disponible : ${this.capacity(b)}.`, 'good', { type: 'select', building: b.id });
+          this.emit('upgraded', b);
           this.emit('mapChanged', region);
         } else {
           delete b.upg;
           b.level++;
           this._updateHappiness();
-          this.notify('✨', `Travaux terminés : ${def.name} au niveau ${b.level} !`, 'good', { type: 'select', building: b.id });
+          this.notify('✨', `Travaux terminés : ${DZ.bName(b)} au niveau ${b.level} !`, 'good', { type: 'select', building: b.id });
           this.emit('upgraded', b);
           this.emit('mapChanged', region);
         }
@@ -467,12 +525,15 @@ window.DZ = window.DZ || {};
     }
 
     isEnclosure(b) { return b && C.buildings[b.type].cat === 'enclos'; }
+    /* Un enclos réuni coûte (entretien, travaux) au prorata de sa taille. */
+    sizeFactor(b) { const def = C.buildings[b.type]; return b.space && def.space ? b.space / def.space : 1; }
+    upkeepOf(b) { const def = C.buildings[b.type]; return def.upkeep ? Math.round(def.upkeep[b.level - 1] * this.sizeFactor(b)) : 0; }
     def(b) { return C.buildings[b.type]; }
 
     upgradeCost(b) {
       const def = C.buildings[b.type];
       if (!def.upgrade || b.level >= C.maxLevel) return null;
-      return def.upgrade[b.level - 1];
+      return Math.round(def.upgrade[b.level - 1] * this.sizeFactor(b));
     }
 
     upgrade(id) {
@@ -499,6 +560,9 @@ window.DZ = window.DZ || {};
       this.s.deliveries = this.s.deliveries.filter((dl) => !(dl.cancelled && this.deliveryPhase(dl).phase === 'prep'));
       refund = Math.round(refund);
       this.s.dinos = this.s.dinos.filter((d) => d.enc !== b.id);
+      for (const l of this.linksOf(b)) refund += this._removeLink(l, true);
+      refund = Math.round(refund);
+      this.fights = this.fights.filter((f) => f.enc !== b.id);
       this.playerTask(b.x + b.w / 2, b.y + b.h / 2, 'demolish', null);
       delete this.s.buildings[id];
       this._rebuildOcc();
@@ -514,6 +578,8 @@ window.DZ = window.DZ || {};
       const b = this.s.buildings[id];
       if (!b || b.fixed) return { ok: false, reason: 'Ce bâtiment ne peut pas être déplacé' };
       if (this.busy(b)) return { ok: false, reason: 'Impossible de déplacer un chantier en cours' };
+      if (b.parts) return { ok: false, reason: 'Un enclos agrandi ne peut pas être déplacé' };
+      if (this.linksOf(b).length) return { ok: false, reason: 'Démolissez d\'abord ses passerelles' };
       const c = this.canPlace(b.type, nx, ny, b.id, true);
       if (!c.ok) return c;
       const old = { x0: b.x - 1, y0: b.y - 1, x1: b.x + b.w, y1: b.y + b.h };
@@ -534,9 +600,11 @@ window.DZ = window.DZ || {};
     accessTiles(b) {
       if (b._accV === this.netVersion) return b._acc;
       const out = [];
-      const add = (x, y) => { if (this.isPath(x, y)) out.push(idx(x, y)); };
-      for (let x = b.x; x < b.x + b.w; x++) { add(x, b.y - 1); add(x, b.y + b.h); }
-      for (let y = b.y; y < b.y + b.h; y++) { add(b.x - 1, y); add(b.x + b.w, y); }
+      const add = (x, y) => { if (this.isPath(x, y) && !out.includes(idx(x, y))) out.push(idx(x, y)); };
+      for (const [px, py, pw, ph] of DZ.encParts(b)) {
+        for (let x = px; x < px + pw; x++) { add(x, py - 1); add(x, py + ph); }
+        for (let y = py; y < py + ph; y++) { add(px - 1, y); add(px + pw, y); }
+      }
       b._acc = out; b._accV = this.netVersion;
       return out;
     }
@@ -643,7 +711,8 @@ window.DZ = window.DZ || {};
     /* ---------- Dinosaures ---------- */
     capacity(b) {
       const def = C.buildings[b.type];
-      return def.space ? Math.floor(def.space * C.enclosureLevels.capacity[b.level - 1]) : 0;
+      const sp = b.space || def.space;
+      return sp ? Math.floor(sp * C.enclosureLevels.capacity[b.level - 1]) : 0;
     }
     usedSpace(b) {
       let s = 0;
@@ -660,7 +729,7 @@ window.DZ = window.DZ || {};
       if (def.cat !== 'enclos') return false;
       if (sp.habitat === 'air') return def.kind === 'air';
       if (sp.habitat === 'water') return def.kind === 'water';
-      return def.kind === 'land' && SIZE_RANK[sp.size] <= SIZE_RANK[def.size];
+      return def.kind === 'land' && SIZE_RANK[sp.size] <= SIZE_RANK[b.size || def.size];
     }
 
     canAddDino(spId, b) {
@@ -905,7 +974,7 @@ window.DZ = window.DZ || {};
       const cost = this.treatCost(d);
       if (this.s.money < cost) return { ok: false, reason: 'Fonds insuffisants' };
       this._spend(cost, 'dinos');
-      d.sick = false; d.sickDays = 0;
+      d.sick = false; d.sickDays = 0; d.injured = 0;
       this.playerTask(d.x, d.y, 'treat', d.enc);
       this._updateHappiness();
       this.emit('dinoTreated', d);
@@ -924,7 +993,8 @@ window.DZ = window.DZ || {};
         if (d.upCare) h += up.care.happiness;
         if (sp.social && !this.s.dinos.some((o) => o !== d && o.enc === d.enc && o.sp === d.sp)) h -= C.socialAlonePenalty;
         if (this.conflictOf(b)) h -= 20;
-        if (d.sick) h -= 30;
+        if (d.sick) h -= d.injured ? 22 : 30;
+        h += this._habitatMood(d, b, sp);
         d.happiness = U.clamp(h, 0, 100);
       }
     }
@@ -954,6 +1024,15 @@ window.DZ = window.DZ || {};
       }
       return { x: sh.cx, y: sh.cy };
     }
+    /* Point au hasard dans un rayon donné (pour les rapprochements et les fuites). */
+    pointNear(b, sp, x, y, r) {
+      const sh = DZ.encShape(b), margin = this.shapeMargin(b, sp);
+      for (let k = 0; k < 24; k++) {
+        const a = R() * U.TAU, l = r * Math.sqrt(R()), px = x + Math.cos(a) * l, py = y + Math.sin(a) * l;
+        if (DZ.encSDF(b, px, py, sh) < -margin) return { x: px, y: py };
+      }
+      return null;
+    }
     shapeMargin(b, sp) {
       const def = C.buildings[b.type];
       if (def.kind === 'water') return 1.1;
@@ -964,6 +1043,17 @@ window.DZ = window.DZ || {};
     keepInside(d, b, sp) {
       const sh = DZ.encShape(b), m = this.shapeMargin(b, sp);
       const sd = DZ.encSDF(b, d.x, d.y, sh);
+      if (sd > -m && sh.multi) {
+        // forme quelconque : on suit la pente de la distance signée
+        for (let it = 0; it < 4; it++) {
+          const e = 0.05, v = DZ.encSDF(b, d.x, d.y, sh);
+          if (v <= -m) break;
+          const gx = DZ.encSDF(b, d.x + e, d.y, sh) - DZ.encSDF(b, d.x - e, d.y, sh), gy = DZ.encSDF(b, d.x, d.y + e, sh) - DZ.encSDF(b, d.x, d.y - e, sh);
+          const gl = Math.hypot(gx, gy) || 1;
+          d.x -= gx / gl * (v + m + 0.03); d.y -= gy / gl * (v + m + 0.03);
+        }
+        return true;
+      }
       if (sd > -m) {
         const dx = sh.cx - d.x, dy = sh.cy - d.y, l = Math.hypot(dx, dy) || 1;
         const push = Math.min(l, sd + m + 0.02);
@@ -982,11 +1072,14 @@ window.DZ = window.DZ || {};
     }
 
     updateDinos(dt) {
+      if (this.fights.length) this._updateFights(dt);
       for (const d of this.s.dinos) {
         const b = this.s.buildings[d.enc];
         if (!b) continue;
         const sp = DZ.SPECIES[d.sp];
         d.t += dt;
+        if (d.fight) continue; // les combats sont animés à part
+        if (d.cross) { this._updateCrossing(d, b, sp, dt); continue; }
         if (sp.habitat === 'air') this._updateFlyer(d, b, sp, dt);
         else if (sp.habitat === 'water') this._updateSwimmer(d, b, sp, dt);
         else this._updateWalker(d, b, sp, dt);
@@ -996,10 +1089,10 @@ window.DZ = window.DZ || {};
     _updateWalker(d, b, sp, dt) {
       d.timer -= dt;
       d.anim += dt;
-      const speed = sp.speed * (d.sick ? 0.5 : 1);
+      const speed = sp.speed * (d.sick ? 0.5 : 1) * (d.run || 1);
       if (d.state === 'walk') {
         const dx = d.gx - d.x, dy = d.gy - d.y, dist = Math.hypot(dx, dy);
-        if (dist < 0.05 || d.timer < -12) { d.state = 'idle'; d.timer = rr(1, 4); d.moving = 0; if (R() < 0.3) d.face = -d.face; }
+        if (dist < 0.05 || d.timer < -12) { d.state = 'idle'; d.timer = rr(1, 4); d.moving = 0; d.run = 0; if (R() < 0.3) d.face = -d.face; }
         else {
           const st = Math.min(dist, speed * dt);
           d.x += dx / dist * st; d.y += dy / dist * st;
@@ -1016,6 +1109,7 @@ window.DZ = window.DZ || {};
       const feeding = (h > 9 && h < 10) || (h > 16 && h < 17);
       const r = R();
       let roarP = sp.roar * (d.sick ? 0.2 : 1);
+      if (this._maybeCross(d, b, sp)) return;
       if (r < roarP) { d.state = 'roar'; d.timer = 1.8; d.anim = 0; this.emit('roar', d); }
       else if (r < roarP + (feeding ? 0.45 : 0.18)) { d.state = 'eat'; d.timer = rr(3, 6); d.anim = 0; }
       else if (r < roarP + 0.28 + (d.sick ? 0.4 : 0)) { d.state = 'rest'; d.timer = rr(4, 8); d.anim = 0; }
@@ -1098,6 +1192,7 @@ window.DZ = window.DZ || {};
         for (const a of list) { dinos += a * f; f *= C.duplicateFactor; }
       }
       decor = Math.min(decor, C.decorAttractionCap);
+      dinos += this.linkShow();
       const diversity = species.size * C.diversityBonus + families.size * C.familyBonus;
       const clean = this.cleanliness();
       const total = (dinos + services + decor + diversity) * (0.8 + 0.2 * clean / 100);
@@ -1172,6 +1267,8 @@ window.DZ = window.DZ || {};
       this.updateDinos(dt);
       this._updateWorks(dh);
       this._updateDeliveries(dh);
+      this._updateLinkWorks(dh);
+      this._checkFights(dh);
       if (s.births.length) this._checkBirths(prevHour);
       this._updatePlayer(dt);
       if (Math.floor(prevHour) !== Math.floor(s.hour)) {
@@ -1270,7 +1367,7 @@ window.DZ = window.DZ || {};
       for (const d of s.dinos) dinoUp += C.dinos[d.sp].upkeep * (d.young ? C.breeding.babyUpkeep : 1);
       for (const id in s.buildings) {
         const b = s.buildings[id], def = C.buildings[b.type];
-        if (def.upkeep) bUp += def.upkeep[b.level - 1];
+        if (def.upkeep) bUp += this.upkeepOf(b);
       }
       s.money -= dinoUp + bUp;
       t.upkeepDinos = dinoUp; t.upkeepBuildings = bUp;
@@ -1288,7 +1385,7 @@ window.DZ = window.DZ || {};
       for (const d of dead) {
         s.dinos = s.dinos.filter((x) => x !== d);
         s.rating = U.clamp(s.rating - E.deathRatingPenalty, 0, 5);
-        this.notify('🕯️', `${this.who(d)} n'a pas survécu à sa maladie.`, 'bad');
+        this.notify('🕯️', `${this.who(d)} n'a pas survécu à ${d.injured ? 'ses blessures' : 'sa maladie'}.`, 'bad');
         this.emit('dinoRemoved', d);
       }
       // conflits entre prédateurs et proies

@@ -106,7 +106,12 @@
 
       game.on('mapChanged', (r) => { this.world.markDirty(r); this._dirtyWorld = true; });
       game.on('reset', () => { this.world.markDirty(null); this._dirtyWorld = true; this._dirtyStatic = true; this.dinoState.clear(); this.world.noise = null; this.world.ridge = null; if (this.far) { G.free(this.gl, this.far.water); G.free(this.gl, this.far.land); this.far = null; } });
-      for (const ev of ['built', 'upgraded', 'moved']) game.on(ev, () => { this._dirtyStatic = true; });
+      for (const ev of ['built', 'upgraded', 'moved', 'merged', 'linkBuilt', 'linkDone', 'linkRemoved']) game.on(ev, () => { this._dirtyStatic = true; });
+      game.on('clash', (e) => {
+        const big = C.dinos[e.sp].space;
+        this.burst3(e.x, e.y, 0.25 + big * 0.03, 'dust');
+        if (big >= 5 && this.cam.dist < 25 && Math.hypot(e.x - this.cam.tx, e.y - this.cam.tz) < this.cam.dist * 1.2) this.shake = Math.max(this.shake, 0.25 + big * 0.04);
+      });
       game.on('demolished', (e) => { if (e.building) this._dirtyStatic = true; });
       game.on('spend', (e) => this.coin(e.x, e.y, e.amount));
       game.on('built', (b) => this.burst3((b.x + b.w / 2), (b.y + b.h / 2), b.w * 0.5, 'build'));
@@ -365,7 +370,7 @@
         const b = g.buildings[id];
         if (b.x + b.w < c.x0 || b.x > c.x1 || b.y + b.h < c.y0 || b.y > c.y1) continue;
         if (b.type === 'arbre' || b.type === 'palmier' || b.type === 'fougere') extra.push([b.type === 'arbre' ? 'araucaria' : b.type, b.seed, b.x + 0.5, b.y + 0.55, 1.1]);
-        else if (g.isEnclosure(b)) for (const d of G.enclosureDecor(b)) if (d.t === 'tree') extra.push([d.k, d.sd, d.x, d.z, d.sc]);
+        else if (g.isEnclosure(b)) for (const d of G.enclosureDecor(b, g.gatesOf(b))) if (d.t === 'tree') extra.push([d.k, d.sd, d.x, d.z, d.sc]);
       }
       const groups = {};
       for (const t of w.chunkTrees(c, extra)) { const key = t[0] + (t[1] % 2); (groups[key] = groups[key] || { kind: t[0], v: t[1] % 2, list: [] }).list.push(t); }
@@ -429,7 +434,7 @@
           const out = G.enclosureInto(mb, glass, b, w);
           glass.pop(); mb.pop();
           for (const l of out.lights) this.lights.push([l[0], l[1] + h, l[2], l[3]]);
-          for (const d of G.enclosureDecor(b)) if (d.t === 'rock') G.rockInto(mb, d.x, w.heightAt(d.x, d.z), d.z, d.size, d.sd);
+          for (const d of G.enclosureDecor(b, g.gatesOf(b))) if (d.t === 'rock') G.rockInto(mb, d.x, w.heightAt(d.x, d.z), d.z, d.size, d.sd);
         } else if (b.type !== 'arbre' && b.type !== 'palmier' && b.type !== 'fougere') {
           mb.push().t(b.x, h, b.y);
           const out = G.buildingInto(mb, b);
@@ -438,6 +443,15 @@
           for (const s2 of out.smoke) this.smoke.push([b.x + s2[0], s2[1] + h, b.y + s2[2]]);
           if (out.fountain) this.fountains.push([b.x + out.fountain[0], out.fountain[1] + h, b.y + out.fountain[2]]);
         }
+      }
+      // passerelles terminées (les chantiers sont dessinés à part)
+      this.linkDeck = new Map();
+      for (const id in g.s.links) {
+        const l = g.s.links[id];
+        this.linkDeck.set(l.id, G.linkDeckY(g, w, l));
+        if (l.cons) continue;
+        const out = G.linkInto(mb, glass, l, w, g, { lights: [] });
+        for (const li of out.lights) this.lights.push(li);
       }
       this.static = mb.empty ? null : G.upload(gl, mb.finish());
       this.glass = glass.empty ? null : G.upload(gl, glass.finish());
@@ -477,6 +491,7 @@
       if (!st) { st = { heading: d.face > 0 ? 0 : Math.PI, foot: false }; this.dinoState.set(d.id, st); }
       let target;
       if (sp.habitat !== 'land') target = d.heading;
+      else if (d.look != null) target = d.look;
       else if (d.moving > 0) target = Math.atan2(d.gy - d.y, d.gx - d.x);
       else target = Math.abs(Math.cos(st.heading)) > 0.2 && Math.sign(Math.cos(st.heading)) !== d.face ? (d.face > 0 ? 0 : Math.PI) : st.heading;
       let diff = target - st.heading;
@@ -484,7 +499,8 @@
       while (diff < -Math.PI) diff += TAU;
       st.heading += U.clamp(diff, -3 * dt, 3 * dt);
       const x = d.x, z = d.y;
-      const gy = this.world.heightAt(x, z);
+      let gy = this.world.heightAt(x, z);
+      if (d.crossK > 0 && d.cross && this.linkDeck && this.linkDeck.has(d.cross.l)) gy += (this.linkDeck.get(d.cross.l) - gy) * d.crossK;
       const root = M4.create();
       const seedT = t + d.id * 3.1;
       const kAge = this.game.dinoScale ? this.game.dinoScale(d) : 1;
@@ -535,6 +551,7 @@
       const hip = M4.copy(root);
       M4.translate(hip, 0, rig.hipH + bob - (rest ? rig.hipH * 0.2 : 0), 0);
       if (moving) M4.rotZ(hip, Math.sin(phase * 2) * 0.012);
+      if (state === 'fight') { const k = d.fightK || 0; M4.rotZ(hip, (sp.fight === 'butt' ? -0.1 : 0.06) * k); if (sp.fight === 'tail') M4.rotY(hip, Math.sin(d.anim * 4) * 0.35); }
       const body = M4.copy(hip); M4.scale(body, 1, 1 + Math.sin(seedT * 1.7) * 0.012, 1 + Math.sin(seedT * 1.7) * 0.008);
       out.push([rig.body, body]);
       // queue
@@ -550,6 +567,14 @@
       let na = rig.neckAng + Math.sin(seedT * 0.7) * 0.04, hr = rig.headRel + Math.sin(seedT * 0.5 + 1) * 0.06, look = 0, jaw = 0;
       if (state === 'eat') { const k = Math.min(1, d.anim * 1.5); const browse = d.sp === 'brachiosaurus'; na -= (browse ? -0.2 : 0.7) * k; hr -= (browse ? -0.3 : 0.35) * k; jaw = Math.max(0, Math.sin(d.anim * 9)) * 0.18 * k; }
       else if (state === 'roar') { const k = Math.sin(Math.min(1, d.anim / 1.8) * Math.PI); na += 0.25 * k; hr += 0.35 * k; jaw = 0.55 * k; }
+      else if (state === 'fight') {
+        // combat : tête basse pour les coups de tête et de cornes, gueule ouverte pour les morsures
+        const k = d.fightK || 0, style = sp.fight || 'bite';
+        if (style === 'butt') { na -= 0.55 + 0.15 * k; hr -= 0.35; }
+        else if (style === 'bite') { na += 0.05 + 0.15 * k; hr += 0.1; jaw = 0.25 + 0.4 * k; }
+        else if (style === 'tail') { na -= 0.2; look = Math.sin(d.anim * 4) * 0.4; }
+        else { na += 0.15 * k; look = Math.sin(d.anim * 3) * 0.5; }
+      }
       else if (rest) { na -= 0.35; hr -= 0.15; }
       else if (!moving) look = Math.sin(seedT * 0.31) * 0.5;
       m = M4.copy(hip); M4.translate(m, rig.shoulder[0], rig.shoulder[1], 0); M4.rotZ(m, na);
@@ -918,7 +943,7 @@
        Chantiers : le bâtiment sort de terre dans son échafaudage
        ------------------------------------------------------------------ */
     worksMesh(b) {
-      const key = b.type + ':' + b.level + ':' + b.x + ':' + b.y;
+      const key = b.type + ':' + b.level + ':' + b.x + ':' + b.y + ':' + b.w + ':' + b.h;
       let e = this.worksCache.get(b.id);
       if (e && e.key === key) return e;
       if (e) { G.free(this.gl, e.mesh); G.free(this.gl, e.scaf); }
@@ -931,7 +956,12 @@
       const data = mb.finish();
       const top = data.bounds.y1 > -1e8 ? data.bounds.y1 - h : 1;
       const hgt = U.clamp(top * 1.05, 0.35, 2.4);
-      e = { key, mesh: G.upload(gl, data), scaf: def.cat === 'deco' ? null : G.upload(gl, G.scaffoldMesh(b.w, b.h, hgt)), h, hgt };
+      let scaf = null;
+      if (def.cat !== 'deco') {
+        if (b.parts) { const sm = new G.MB(); for (const [px, py, pw, ph] of b.parts) { sm.push().t(px - b.x, 0, py - b.y); sm.add(G.scaffoldMesh(pw, ph, hgt)); sm.pop(); } scaf = sm.finish(); }
+        else scaf = G.scaffoldMesh(b.w, b.h, hgt);
+      }
+      e = { key, mesh: G.upload(gl, data), scaf: scaf && G.upload(gl, scaf), h, hgt };
       this.worksCache.set(b.id, e);
       return e;
     }
@@ -951,12 +981,37 @@
           const m = M4.create(); M4.translate(m, 0, e.h, 0); M4.scale(m, 1, k, 1); M4.translate(m, 0, -e.h, 0);
           parts.push([e.mesh, m]);
         }
-        if (e.scaf) {
+        if (b.upg && b.upg.merge) {
+          // démontage de la clôture commune : poussière le long de la couture
+          const sm = b.upg.seam;
+          this.works.push({ b, x: sm.x, y: e.h + 1.1, z: sm.y, p, label: '🔗 Réunion' });
+          if (g.speed && Math.random() < 0.08 * Math.min(2, g.speed)) { const o = (Math.random() - 0.5) * 3; this.addP({ k: 'dust', x: sm.x + (sm.dir === 'h' ? o : 0), y: e.h + 0.05, z: sm.y + (sm.dir === 'v' ? o : 0), vx: (Math.random() - 0.5) * 0.3, vy: 0.12, vz: (Math.random() - 0.5) * 0.3, life: 0, max: 1.5, s: 0.3 }); }
+        } else if (e.scaf) {
           const base = M4.create(); M4.translate(base, b.x, e.h, b.y);
           parts.push([e.scaf, base]);
           this.works.push({ b, x: b.x + b.w / 2, y: e.h + e.hgt + 0.35, z: b.y + b.h / 2, p });
           if (g.speed && Math.random() < 0.05 * Math.min(2, g.speed)) this.addP({ k: 'dust', x: b.x + 0.3 + Math.random() * (b.w - 0.6), y: e.h + 0.05, z: b.y + 0.3 + Math.random() * (b.h - 0.6), vx: (Math.random() - 0.5) * 0.3, vy: 0.12, vz: (Math.random() - 0.5) * 0.3, life: 0, max: 1.5, s: 0.28 });
         }
+      }
+      // passerelles en chantier : échafaudage sur le tracé
+      for (const id in g.s.links) {
+        const l = g.s.links[id];
+        if (!l.cons) continue;
+        const key = 'L' + l.id;
+        seen.add(key);
+        let e = this.worksCache.get(key);
+        const deck = this.linkDeck && this.linkDeck.get(l.id);
+        if (!e) {
+          const K = C.links, w = l.dir === 'x' ? Math.max(0.6, l.w + K.ramp) : l.w, d = l.dir === 'x' ? l.h : Math.max(0.6, l.h + K.ramp);
+          const h = Math.max(this.world.buildingHeight(g.buildings[l.a]) || 0, 0);
+          e = { key, mesh: null, scaf: G.upload(this.gl, G.scaffoldMesh(w, d, Math.max(0.5, (deck || h + 0.6) - h + 0.5))), h, w, d };
+          this.worksCache.set(key, e);
+        }
+        const ox = l.dir === 'x' ? l.x - (e.w - l.w) / 2 : l.x, oz = l.dir === 'x' ? l.y : l.y - (e.d - l.h) / 2;
+        const base = M4.create(); M4.translate(base, ox, e.h, oz);
+        parts.push([e.scaf, base]);
+        const c = g.linkCenter(l);
+        this.works.push({ b: { upg: null }, x: c.x, y: (deck || e.h + 0.6) + 0.9, z: c.y, p: g.linkProgress(l), label: l.len ? '🌉 Passerelle' : '🚪 Porte' });
       }
       for (const [id, e] of this.worksCache) if (!seen.has(id)) { G.free(this.gl, e.mesh); G.free(this.gl, e.scaf); this.worksCache.delete(id); }
     }
@@ -1091,6 +1146,12 @@
       gl.uniform3fv(lit.u.uTint, col); gl.uniform1f(lit.u.uTintAmt, 1); gl.uniform1f(lit.u.uAlpha, alpha); gl.uniform1f(lit.u.uUnlit, 1);
       this.drawMesh(lit, this.quadMesh, m);
     }
+    /* Tracé d'une passerelle au sol (rampes comprises). */
+    linkRect(lit, l, col, alpha) {
+      const K = C.links;
+      if (l.dir === 'x') { this.drawRect(lit, l.x - K.ramp, l.y, l.w + K.ramp * 2, l.h, col, alpha * 0.45, 0.09); if (l.w) this.drawRect(lit, l.x, l.y, l.w, l.h, col, alpha, 0.1); }
+      else { this.drawRect(lit, l.x, l.y - K.ramp, l.w, l.h + K.ramp * 2, col, alpha * 0.45, 0.09); if (l.h) this.drawRect(lit, l.x, l.y, l.w, l.h, col, alpha, 0.1); }
+    }
     outline(lit, x, z, w, d, col, alpha, th) {
       const k = th || 0.05;
       this.drawRect(lit, x, z, w, k, col, alpha, 0.08); this.drawRect(lit, x, z + d - k, w, k, col, alpha, 0.08);
@@ -1120,14 +1181,16 @@
           const b = game.buildings[id];
           if (!game.isEnclosure(b)) continue;
           const ok = this.highlightEnclosures(b);
-          this.drawRect(lit, b.x, b.y, b.w, b.h, ok ? [0.47, 0.86, 0.55] : [0.86, 0.35, 0.27], ok ? 0.22 : 0.14, 0.07);
-          this.outline(lit, b.x, b.y, b.w, b.h, ok ? [0.6, 0.95, 0.65] : [0.9, 0.45, 0.35], 0.8);
+          for (const [px, py, pw, ph] of DZ.encParts(b)) {
+            this.drawRect(lit, px, py, pw, ph, ok ? [0.47, 0.86, 0.55] : [0.86, 0.35, 0.27], ok ? 0.22 : 0.14, 0.07);
+            this.outline(lit, px, py, pw, ph, ok ? [0.6, 0.95, 0.65] : [0.9, 0.45, 0.35], 0.8);
+          }
         }
       }
       if (this.selected) {
         if (this.selected.kind === 'building') {
           const b = game.buildings[this.selected.id];
-          if (b) this.outline(lit, b.x, b.y, b.w, b.h, [1, 0.92, 0.67], pulse, 0.06);
+          if (b) for (const [px, py, pw, ph] of DZ.encParts(b)) this.outline(lit, px, py, pw, ph, [1, 0.92, 0.67], pulse, 0.06);
         } else {
           const p = (this.poses || []).find((q) => q.d.id === this.selected.id);
           if (p) {
@@ -1164,8 +1227,14 @@
           }
         } else if (gh.kind === 'demolish') {
           const b = gh.building;
-          if (b) { this.drawRect(lit, b.x, b.y, b.w, b.h, [0.86, 0.24, 0.16], 0.35, 0.08); this.outline(lit, b.x, b.y, b.w, b.h, [0.95, 0.35, 0.27], 0.95); }
+          if (b) for (const [px, py, pw, ph] of DZ.encParts(b)) { this.drawRect(lit, px, py, pw, ph, [0.86, 0.24, 0.16], 0.35, 0.08); this.outline(lit, px, py, pw, ph, [0.95, 0.35, 0.27], 0.95); }
+          else if (gh.link) this.linkRect(lit, gh.link, [0.86, 0.24, 0.16], 0.45);
           else { this.drawRect(lit, gh.x, gh.y, 1, 1, [0.86, 0.24, 0.16], 0.4, 0.08); }
+        } else if (gh.kind === 'link' || gh.kind === 'merge') {
+          // aperçu d'une passerelle ou d'une réunion d'enclos
+          const col = gh.ok ? [0.47, 0.9, 0.55] : [0.9, 0.31, 0.24], lc = gh.ok ? [0.6, 0.95, 0.65] : [0.95, 0.4, 0.3];
+          for (const id of [gh.a, gh.b]) { const b = game.buildings[id]; if (b) for (const [px, py, pw, ph] of DZ.encParts(b)) { this.drawRect(lit, px, py, pw, ph, col, 0.16, 0.07); this.outline(lit, px, py, pw, ph, lc, 0.9); } }
+          if (gh.kind === 'link' && gh.plan && gh.plan.dir) this.linkRect(lit, gh.plan, col, 0.5);
         }
       }
       gl.uniform1f(lit.u.uTintAmt, 0); gl.uniform1f(lit.u.uAlpha, 1); gl.uniform1f(lit.u.uUnlit, 0);
@@ -1209,7 +1278,7 @@
         for (const w of this.works || []) {
           const sp = this.project(w.x, w.y, w.z);
           if (!sp || sp.x < -60 || sp.y < -30 || sp.x > W2 + 60 || sp.y > H2 + 30) continue;
-          const bw = 64, label = w.b.upg ? `⬆ Niv. ${w.b.level + 1} · ${Math.round(w.p * 100)} %` : `🚧 ${Math.round(w.p * 100)} %`;
+          const bw = 64, label = w.label ? `${w.label} · ${Math.round(w.p * 100)} %` : w.b.upg ? `⬆ Niv. ${w.b.level + 1} · ${Math.round(w.p * 100)} %` : `🚧 ${Math.round(w.p * 100)} %`;
           o.fillStyle = 'rgba(20,24,18,0.72)'; this.rrect(o, sp.x - bw / 2 - 6, sp.y - 22, bw + 12, 30, 8); o.fill();
           o.fillStyle = 'rgba(255,255,255,0.15)'; this.rrect(o, sp.x - bw / 2, sp.y - 3, bw, 6, 3); o.fill();
           o.fillStyle = '#e6bb5c'; this.rrect(o, sp.x - bw / 2, sp.y - 3, Math.max(4, bw * w.p), 6, 3); o.fill();

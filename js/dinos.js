@@ -167,3 +167,26 @@ DZ.DINO_NAMES_M = [
   'Lucky', 'Rubis', 'Achille', 'Bruno', 'Cactus', 'Igor', 'Marius', 'Silex', 'Tobias', 'Volcan'
 ];
 DZ.dinoName = function (sex, i) { const l = sex === 'F' ? DZ.DINO_NAMES_F : DZ.DINO_NAMES_M; return l[i % l.length]; };
+
+/* Rivalités entre mâles adultes.
+   terr : tempérament territorial (0 paisible → 1 très territorial)
+   fight : style de combat (bite : morsures, butt : coups de tête ou de cornes,
+           tail : coups de queue, shove : poussées d'encolure ou d'épaules) */
+(function () {
+  const T = {
+    compsognathus: [0.15, 'bite'], dryosaurus: [0.15, 'shove'], psittacosaurus: [0.35, 'butt'],
+    pachycephalosaurus: [0.9, 'butt'], parasaurolophus: [0.3, 'shove'], triceratops: [0.75, 'butt'],
+    stegosaurus: [0.45, 'tail'], ankylosaurus: [0.5, 'tail'], diplodocus: [0.25, 'shove'], brachiosaurus: [0.2, 'shove'],
+    velociraptor: [0.6, 'bite'], dilophosaurus: [0.7, 'bite'], allosaurus: [0.9, 'bite'], carnotaurus: [0.95, 'butt'],
+    spinosaurus: [0.9, 'bite'], trex: [1, 'bite'],
+    pteranodon: [0, 'bite'], quetzalcoatlus: [0, 'bite'], plesiosaurus: [0, 'bite'], mosasaurus: [0, 'bite']
+  };
+  for (const id in T) if (DZ.SPECIES[id]) { DZ.SPECIES[id].terr = T[id][0]; DZ.SPECIES[id].fight = T[id][1]; }
+  // longueur du corps, queue comprise (en cases), pour placer les combattants tête contre tête
+  const LEN = {
+    compsognathus: 0.84, dryosaurus: 1.1, psittacosaurus: 0.97, pachycephalosaurus: 1.44, parasaurolophus: 2.17, triceratops: 2.57,
+    stegosaurus: 2.81, ankylosaurus: 2.39, diplodocus: 3.56, brachiosaurus: 3.38, velociraptor: 1.2, dilophosaurus: 1.9,
+    allosaurus: 2.63, carnotaurus: 2.32, spinosaurus: 3.32, trex: 3.27
+  };
+  for (const id in LEN) DZ.SPECIES[id].len = LEN[id];
+})();

@@ -235,7 +235,14 @@
       const r = U.rng(b.seed + b.level * 13);
       if (def.cat === 'enclos') {
         g.save();
-        g.beginPath(); g.rect(x + 1, y + 1, w - 2, h - 2); g.clip();
+        g.beginPath();
+        for (const [px, py, pw, ph] of DZ.encParts(b)) g.rect(px * T + 1, py * T + 1, pw * T - 2, ph * T - 2);
+        if (b.parts) for (let i = 0; i < b.parts.length; i++) for (let j = 0; j < b.parts.length; j++) { // pas de liseré entre deux parties
+          const p = b.parts[i], q = b.parts[j];
+          if (p[0] + p[2] === q[0]) g.rect(q[0] * T - 2, Math.max(p[1], q[1]) * T + 1, 4, (Math.min(p[1] + p[3], q[1] + q[3]) - Math.max(p[1], q[1])) * T - 2);
+          if (p[1] + p[3] === q[1]) g.rect(Math.max(p[0], q[0]) * T + 1, q[1] * T - 2, (Math.min(p[0] + p[2], q[0] + q[2]) - Math.max(p[0], q[0])) * T - 2, 4);
+        }
+        g.clip();
         if (def.kind === 'water') {
           const rim = b.level === 1 ? 'sand' : 'concrete';
           g.fillStyle = this.pat(g, rim); g.fillRect(x, y, w, h);
@@ -259,9 +266,9 @@
           g.globalAlpha = 1;
           // bande piétinée le long de la clôture
           g.strokeStyle = 'rgba(80,60,35,0.35)'; g.lineWidth = 6;
-          g.strokeRect(x + 4, y + 4, w - 8, h - 8);
+          if (!b.parts) g.strokeRect(x + 4, y + 4, w - 8, h - 8);
           // mare (niveau 2+, enclos moyens et grands)
-          if (b.level >= 2 && b.w * b.h >= 20 && def.kind === 'land') {
+          if (b.level >= 2 && b.w * b.h >= 20 && def.kind === 'land' && !b.parts) {
             const px = x + w * (0.25 + r() * 0.5), py = y + h * (0.55 + r() * 0.2), rx = 14 + b.w * 2, ry = 9 + b.h;
             g.fillStyle = 'rgba(60,50,30,0.5)'; g.beginPath(); g.ellipse(px, py, rx + 4, ry + 3, 0, 0, U.TAU); g.fill();
             const gr = g.createRadialGradient(px, py, 2, px, py, rx);

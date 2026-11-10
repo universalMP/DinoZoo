@@ -1150,6 +1150,46 @@ window.DZ = window.DZ || {};
           o.g.gain.value = 0.7; setTimeout(o.end, 1500);
           break;
         }
+        case 'clash': { // choc d'un combat entre deux mâles
+          if (!this._throttle('clash', 250)) return;
+          const o = this.out(pos || null, { range: 55 });
+          if (!o) return;
+          const sp = DZ.SPECIES[opt.sp] || {}, size = (DZ.CONFIG.dinos[opt.sp] || { space: 3 }).space, style = sp.fight || 'bite';
+          const low = 1 / Math.sqrt(size);
+          // impact sourd des corps
+          const th = this._src(this.brown, t, 0.4), tl = this._filter('lowpass', 90 + 160 * low), tg = c.createGain();
+          th.connect(tl); tl.connect(tg); tg.connect(o.g); this._env(tg.gain, t, 0.004, 0.9, 0.03, 0.25);
+          if (style === 'butt') {
+            // crânes ou cornes qui s'entrechoquent : modes d'un os creux
+            const f = rr(170, 230) * (0.6 + low);
+            for (const [r, a, d] of [[1, 1, 0.12], [2.3, 0.45, 0.07], [3.9, 0.22, 0.04]]) {
+              const s2 = this._osc('sine', f * r, t, d * 6), gg = c.createGain();
+              s2.connect(gg); gg.connect(o.g); gg.gain.setValueAtTime(0.0001, t); gg.gain.linearRampToValueAtTime(0.32 * a, t + 0.002); gg.gain.setTargetAtTime(0.0001, t + 0.004, d / 3);
+            }
+            const k = this._src(this.white, t, 0.05), kb = this._filter('bandpass', 1400, 1.4), kg = c.createGain();
+            k.connect(kb); kb.connect(kg); kg.connect(o.g); this._env(kg.gain, t, 0.001, 0.25, 0.004, 0.03);
+          } else if (style === 'bite') {
+            // claquement de mâchoires
+            for (const dt of [0, rr(0.07, 0.12)]) {
+              const k = this._src(this.white, t + dt, 0.04), kb = this._filter('bandpass', 2600 * (0.7 + low * 0.5), 2), kg = c.createGain();
+              k.connect(kb); kb.connect(kg); kg.connect(o.g); this._env(kg.gain, t + dt, 0.001, 0.3, 0.003, 0.025);
+            }
+            if (this._throttle('clashGrowl', 1600) && opt.sp) this.dino(opt.sp, pos || null, false);
+          } else if (style === 'tail') {
+            // sifflement de la queue puis coup
+            const n = this._src(this.pink, t - 0.0, 0.3), bp = this._filter('bandpass', 500, 1.2), g = c.createGain();
+            bp.frequency.setValueAtTime(400, t); bp.frequency.exponentialRampToValueAtTime(1800, t + 0.18);
+            n.connect(bp); bp.connect(g); g.connect(o.g); this._env(g.gain, t, 0.08, 0.25, 0.02, 0.08);
+            const k = this._src(this.brown, t + 0.18, 0.2), kl = this._filter('lowpass', 260), kg = c.createGain();
+            k.connect(kl); kl.connect(kg); kg.connect(o.g); this._env(kg.gain, t + 0.18, 0.003, 0.7, 0.02, 0.15);
+          } else {
+            // poussée : frottement des peaux et des pattes dans la poussière
+            const n = this._src(this.pink, t, 0.5), bp = this._filter('bandpass', 700, 0.9), g = c.createGain();
+            n.connect(bp); bp.connect(g); g.connect(o.g); this._env(g.gain, t, 0.04, 0.22, 0.12, 0.25);
+          }
+          o.g.gain.value = 0.55 + Math.min(0.35, size * 0.04); setTimeout(o.end, 1400);
+          break;
+        }
         case 'alarm': { // sirène du parc, à travers un haut-parleur
           const o = this.out(null, { bus: this.sfxBus });
           for (let i = 0; i < 6; i++) {

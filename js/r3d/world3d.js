@@ -99,11 +99,12 @@
       for (const id in g.buildings) {
         const b = g.buildings[id];
         let sum = 0, n = 0;
-        for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) { sum += g.elev[y * W + x]; n++; }
+        const parts = DZ.encParts(b);
+        for (const [px, py, pw, ph] of parts) for (let y = py; y < py + ph; y++) for (let x = px; x < px + pw; x++) { sum += g.elev[y * W + x]; n++; }
         const hb = n ? Math.max(0.02, sum / n) : 0;
         this.bh.set(b.id, hb);
         const def = C.buildings[b.type];
-        for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) { occH[y * W + x] = hb; occA[y * W + x] = def.cat === 'enclos' ? 0.15 : 0; }
+        for (const [px, py, pw, ph] of parts) for (let y = py; y < py + ph; y++) for (let x = px; x < px + pw; x++) { occH[y * W + x] = hb; occA[y * W + x] = def.cat === 'enclos' ? 0.15 : 0; }
       }
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
         const tx = x - MARGIN, ty = y - MARGIN, i = y * w + x;
@@ -149,21 +150,27 @@
       this.f = { th, amp, col, w, h };
       // enclos à proximité de chaque case (pour les formes organiques)
       this.encNear = new Int32Array(W * H);
-      for (const id in g.buildings) {
-        const b = g.buildings[id];
-        if (!g.isEnclosure(b)) continue;
-        b._sh = DZ.encShape(b);
-        for (let y = Math.max(0, b.y - 2); y < Math.min(H, b.y + b.h + 2); y++) for (let x = Math.max(0, b.x - 2); x < Math.min(W, b.x + b.w + 2); x++) this.encNear[y * W + x] = b.id;
-      }
+      const encs = [];
+      for (const id in g.buildings) { const b = g.buildings[id]; if (g.isEnclosure(b)) { b._sh = DZ.encShape(b); encs.push(b); } }
+      // abords d'abord, puis l'emprise de chaque enclos (deux enclos voisins ne se chevauchent pas)
+      for (const b of encs) for (const [px, py, pw, ph] of DZ.encParts(b)) for (let y = Math.max(0, py - 2); y < Math.min(H, py + ph + 2); y++) for (let x = Math.max(0, px - 2); x < Math.min(W, px + pw + 2); x++) if (!g.occ[y * W + x]) this.encNear[y * W + x] = b.id;
+      for (const b of encs) for (const [px, py, pw, ph] of DZ.encParts(b)) for (let y = py; y < py + ph; y++) for (let x = px; x < px + pw; x++) this.encNear[y * W + x] = b.id;
       this.buildPathSegments();
       this.noise = this.noise || U.makeFbm(seed + 77, 32, 3);
       this.ridge = this.ridge || U.makeFbm(seed + 91, 16, 2);
       this.ponds = [];
       for (const id in g.buildings) {
         const b = g.buildings[id], def = C.buildings[b.type];
-        if (def.kind === 'land' && b.level >= 2 && b.w * b.h >= 60) {
-          const rnd = U.rng(b.seed + b.level * 13);
-          this.ponds.push({ x: b.x + b.w * (0.25 + rnd() * 0.5), z: b.y + b.h * (0.55 + rnd() * 0.2), rx: 0.8 + b.w * 0.06, rz: 0.6 + b.h * 0.05, base: this.bh.get(b.id) });
+        if (def.kind === 'land' && b.level >= 2) {
+          // une mare par partie assez grande (un enclos réuni peut en avoir plusieurs)
+          DZ.encParts(b).forEach(([px, py, pw, ph], i) => {
+            if (pw * ph < 60) return;
+            const rnd = U.rng(b.seed + b.level * 13 + i * 71);
+            const pd = { x: px + pw * (0.25 + rnd() * 0.5), z: py + ph * (0.55 + rnd() * 0.2), rx: 0.8 + pw * 0.06, rz: 0.6 + ph * 0.05, base: this.bh.get(b.id) };
+            // pas de mare au pied d'une rampe de passerelle
+            if (g.gatesOf(b).some((q) => pd.x + pd.rx + 0.6 > q.x0 && pd.x - pd.rx - 0.6 < q.x1 && pd.z + pd.rz + 0.6 > q.y0 && pd.z - pd.rz - 0.6 < q.y1)) return;
+            this.ponds.push(pd);
+          });
         }
       }
     }

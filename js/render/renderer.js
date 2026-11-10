@@ -8,6 +8,7 @@
 (function () {
   const U = DZ.util, R = DZ.R, C = DZ.CONFIG;
   const T = C.map.tile, W = C.map.w, H = C.map.h, M = C.map.margin;
+  const LINK_DH = 14; // hauteur du tablier des passerelles (pixels)
   const TAU = U.TAU;
 
   /* Couleur d'éclairage interpolée selon l'heure. */
@@ -384,11 +385,19 @@
           }
         }
       }
+      // passerelles
+      for (const id in game.s.links) {
+        const l = game.s.links[id];
+        if (!vis((l.x + l.w / 2) * T, (l.y + l.h / 2) * T, 200)) continue;
+        out.push(this.linkObj(l, t));
+      }
       // dinosaures
       for (const d of game.dinos) {
         const x = d.x * T, y = d.y * T;
         if (!vis(x, y, 160)) continue;
-        out.push(this.dinoObj(d, x, y, t));
+        const o = this.dinoObj(d, x, y - (d.crossK || 0) * LINK_DH, t);
+        if (d.crossK > 0.05) o.y = y + 60; // au-dessus du tablier
+        out.push(o);
       }
       // avatar du directeur ou de la directrice
       const pl = game.pl;
@@ -442,6 +451,53 @@
       };
     }
 
+    /* Passerelle vue de dessus : rampes, piliers, tablier surélevé et garde-corps. */
+    linkObj(l, t) {
+      const K = C.links, game = this.game, a = game.linkAxis(l), self = this;
+      const hz = l.dir === 'x';
+      const x0 = l.x * T, y0 = l.y * T, w = l.w * T, h = l.h * T, rp = K.ramp * T;
+      return {
+        y: (l.y + l.h) * T + 2,
+        draw: (g) => {
+          const prog = game.linkProgress(l);
+          g.save();
+          g.globalAlpha = l.cons ? 0.35 + 0.5 * prog : 1;
+          // rampes dans les enclos
+          g.fillStyle = '#7d5c3e';
+          if (hz) { g.fillRect(x0 - rp, y0 + 2, rp, h - 4); g.fillRect(x0 + w, y0 + 2, rp, h - 4); }
+          else { g.fillRect(x0 + 2, y0 - rp, w - 4, rp); g.fillRect(x0 + 2, y0 + h, w - 4, rp); }
+          g.fillStyle = 'rgba(0,0,0,0.18)';
+          for (let k = 0; k < 6; k++) { const f = k / 6; if (hz) { g.fillRect(x0 - rp + f * rp, y0 + 2, 1, h - 4); g.fillRect(x0 + w + f * rp, y0 + 2, 1, h - 4); } else { g.fillRect(x0 + 2, y0 - rp + f * rp, w - 4, 1); g.fillRect(x0 + 2, y0 + h + f * rp, w - 4, 1); } }
+          if (l.len) {
+            // piliers et ombre du tablier
+            g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(x0 + 3, y0 + 4, w - 2, h - 2);
+            g.fillStyle = '#a9a59b';
+            if (hz) for (const u of [0.3, l.w - 0.3]) { g.fillRect(x0 + u * T - 2, y0 + 3 - LINK_DH, 4, LINK_DH); g.fillRect(x0 + u * T - 2, y0 + h - 5 - LINK_DH, 4, LINK_DH + 2); }
+            else for (const u of [0.3, l.h - 0.3]) { g.fillRect(x0 + 3, y0 + u * T - LINK_DH, 4, LINK_DH); g.fillRect(x0 + w - 7, y0 + u * T - LINK_DH, 4, LINK_DH); }
+            // tablier en planches
+            g.fillStyle = R.pattern(g, 'planks');
+            g.fillRect(x0, y0 - LINK_DH, w, h);
+            g.fillStyle = 'rgba(255,240,210,0.12)'; g.fillRect(x0, y0 - LINK_DH, w, 2);
+            // garde-corps vitrés
+            g.fillStyle = 'rgba(190,225,235,0.35)';
+            if (hz) { g.fillRect(x0, y0 - LINK_DH - 8, w, 8); g.fillRect(x0, y0 + h - LINK_DH - 8, w, 8); }
+            else { g.fillRect(x0 - 1, y0 - LINK_DH - 8, 3, h + 8); g.fillRect(x0 + w - 2, y0 - LINK_DH - 8, 3, h + 8); }
+            g.strokeStyle = '#3f474c'; g.lineWidth = 1.2;
+            g.strokeRect(x0 + 0.5, y0 - LINK_DH - 8, w - 1, h + 8);
+          }
+          // portiques
+          g.fillStyle = '#3f474c';
+          const ends = l.len ? [a.a0, a.a1] : [a.a0];
+          for (const u of ends) {
+            if (hz) { g.fillRect(u * T - 1.5, y0 - LINK_DH - 22, 3, 22 + LINK_DH); g.fillRect(u * T - 1.5, y0 + h - LINK_DH - 22, 3, 22 + LINK_DH); g.fillRect(u * T - 2, y0 - LINK_DH - 24, 4, h + 2); }
+            else { g.fillRect(x0 - 1, u * T - LINK_DH - 22, 3, 22); g.fillRect(x0 + w - 2, u * T - LINK_DH - 22, 3, 22); g.fillRect(x0 - 1, u * T - LINK_DH - 24, w + 2, 4); }
+          }
+          g.restore();
+          if (l.cons) self.scaffold2D(g, x0 - (hz ? rp / 2 : 0), y0 - (hz ? 0 : rp / 2), w + (hz ? rp : 0), h + (hz ? 0 : rp), 22);
+        }
+      };
+    }
+
     dinoObj(d, x, y, t) {
       const o = this.dinoObj0(d, x, y, t), k = this.game.dinoScale(d);
       if (k >= 1) return o;
@@ -479,7 +535,8 @@
       return {
         y,
         draw: (g) => {
-          R.drawSideDino(g, rig, d, t, { x, y });
+          if (d.state === 'fight') { d.state = 'roar'; d.anim = 0.6 + (d.fightK || 0) * 0.3; R.drawSideDino(g, rig, d, t, { x, y }); d.state = 'fight'; }
+          else R.drawSideDino(g, rig, d, t, { x, y });
           // poussière sous les pas des gros dinosaures
           if (d.moving > 0 && C.dinos[d.sp].space >= 4) {
             const s = Math.sin(d.phase) > 0;
@@ -777,8 +834,7 @@
           g.fillStyle = ok ? 'rgba(120,220,140,0.16)' : 'rgba(220,90,70,0.10)';
           g.strokeStyle = ok ? 'rgba(150,240,160,0.8)' : 'rgba(230,110,90,0.5)';
           g.lineWidth = 2;
-          g.fillRect(b.x * T, b.y * T, b.w * T, b.h * T);
-          g.strokeRect(b.x * T + 1, b.y * T + 1, b.w * T - 2, b.h * T - 2);
+          for (const [px, py, pw, ph] of DZ.encParts(b)) { g.fillRect(px * T, py * T, pw * T, ph * T); g.strokeRect(px * T + 1, py * T + 1, pw * T - 2, ph * T - 2); }
         }
       }
       // sélection
@@ -788,7 +844,7 @@
           g.save();
           g.strokeStyle = `rgba(255,236,170,${0.7 + Math.sin(t * 5) * 0.3})`;
           g.lineWidth = 2; g.setLineDash([8, 5]); g.lineDashOffset = -t * 24;
-          g.strokeRect(b.x * T + 1, b.y * T + 1, b.w * T - 2, b.h * T - 2);
+          for (const [px, py, pw, ph] of DZ.encParts(b)) g.strokeRect(px * T + 1, py * T + 1, pw * T - 2, ph * T - 2);
           g.restore();
         }
       }
@@ -831,10 +887,23 @@
         } else if (gh.kind === 'demolish') {
           const b = gh.building;
           g.fillStyle = 'rgba(220,60,40,0.3)'; g.strokeStyle = 'rgba(240,90,70,0.95)'; g.lineWidth = 2;
-          if (b) { g.fillRect(b.x * T, b.y * T, b.w * T, b.h * T); g.strokeRect(b.x * T + 1, b.y * T + 1, b.w * T - 2, b.h * T - 2); }
+          if (b) for (const [px, py, pw, ph] of DZ.encParts(b)) { g.fillRect(px * T, py * T, pw * T, ph * T); g.strokeRect(px * T + 1, py * T + 1, pw * T - 2, ph * T - 2); }
+          else if (gh.link) this.linkRect2D(g, gh.link);
           else { g.fillRect(gh.x * T, gh.y * T, T, T); g.strokeRect(gh.x * T + 1, gh.y * T + 1, T - 2, T - 2); }
+        } else if (gh.kind === 'link' || gh.kind === 'merge') {
+          g.fillStyle = gh.ok ? 'rgba(120,230,140,0.16)' : 'rgba(230,80,60,0.2)';
+          g.strokeStyle = gh.ok ? 'rgba(150,240,160,0.95)' : 'rgba(240,100,80,0.95)';
+          g.lineWidth = 2;
+          for (const id of [gh.a, gh.b]) { const b = game.buildings[id]; if (b) for (const [px, py, pw, ph] of DZ.encParts(b)) { g.fillRect(px * T, py * T, pw * T, ph * T); g.strokeRect(px * T + 1, py * T + 1, pw * T - 2, ph * T - 2); } }
+          if (gh.kind === 'link' && gh.plan && gh.plan.dir) { g.fillStyle = gh.ok ? 'rgba(150,240,160,0.45)' : 'rgba(240,100,80,0.45)'; this.linkRect2D(g, gh.plan); }
         }
       }
+    }
+
+    linkRect2D(g, l) {
+      const rp = C.links.ramp * T;
+      if (l.dir === 'x') g.fillRect(l.x * T - rp, l.y * T, l.w * T + rp * 2, l.h * T);
+      else g.fillRect(l.x * T, l.y * T - rp, l.w * T, l.h * T + rp * 2);
     }
 
     /* ---------- Sélection ---------- */

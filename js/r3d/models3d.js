@@ -396,7 +396,11 @@
       for (let it = 0; it < 22; it++) { const m = (lo + hi) / 2; if (DZ.encSDF(b, sh.cx + ux * m, sh.cy + uz * m, sh) < offset) lo = m; else hi = m; }
       raw.push([sh.cx + ux * lo - b.x, sh.cy + uz * lo - b.y]);
     }
-    // rééchantillonnage à pas constant
+    return resampleLoop(raw, spacing);
+  };
+  /* Rééchantillonnage à pas constant d'une boucle fermée. */
+  function resampleLoop(raw, spacing) {
+    const N = raw.length;
     let total = 0;
     const seg = raw.map((p, i) => { const q = raw[(i + 1) % N]; const l = Math.hypot(q[0] - p[0], q[1] - p[1]); total += l; return l; });
     const n = Math.max(8, Math.round(total / spacing));
@@ -404,12 +408,85 @@
     let i = 0, acc = 0;
     for (let k = 0; k < n; k++) {
       const target = k / n * total;
-      while (acc + seg[i] < target) { acc += seg[i]; i = (i + 1) % N; }
+      while (acc + seg[i] < target && acc + seg[i] < total) { acc += seg[i]; i = (i + 1) % N; }
       const t = seg[i] ? (target - acc) / seg[i] : 0, p = raw[i], q = raw[(i + 1) % N];
       out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
     }
     return out;
+  }
+
+  /* Contours d'un enclos quelconque (enclos réunis) : marching squares sur la
+     distance signée, boucles orientées comme encContour (normale extérieure à
+     droite du sens de parcours). Une boucle par contour. */
+  G.encLoops = function (b, offset, spacing) {
+    if (!b.parts) return [G.encContour(b, offset, spacing)];
+    const sh = DZ.encShape(b), st = 0.1;
+    const ox = b.x - 0.3, oz = b.y - 0.3;
+    const nx = Math.ceil((b.w + 0.6) / st) + 1, nz = Math.ceil((b.h + 0.6) / st) + 1;
+    const v = new Float32Array(nx * nz);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) v[j * nx + i] = DZ.encSDF(b, ox + i * st, oz + j * st, sh) - offset;
+    const H0 = nx * nz;
+    const hE = (i, j) => j * nx + i, vE = (i, j) => H0 + j * nx + i;
+    const adj = new Map();
+    const link = (e1, e2) => { (adj.get(e1) || adj.set(e1, []).get(e1)).push(e2); (adj.get(e2) || adj.set(e2, []).get(e2)).push(e1); };
+    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      const a = v[j * nx + i], bb = v[j * nx + i + 1], c = v[(j + 1) * nx + i + 1], d = v[(j + 1) * nx + i];
+      const k = (a < 0 ? 1 : 0) | (bb < 0 ? 2 : 0) | (c < 0 ? 4 : 0) | (d < 0 ? 8 : 0);
+      if (k === 0 || k === 15) continue;
+      const T = hE(i, j), Rr = vE(i + 1, j), B = hE(i, j + 1), L = vE(i, j);
+      const centerIn = (a + bb + c + d) / 4 < 0;
+      switch (k) {
+        case 1: case 14: link(L, T); break;
+        case 2: case 13: link(T, Rr); break;
+        case 3: case 12: link(L, Rr); break;
+        case 4: case 11: link(Rr, B); break;
+        case 6: case 9: link(T, B); break;
+        case 7: case 8: link(L, B); break;
+        case 5: if (centerIn) { link(L, B); link(T, Rr); } else { link(L, T); link(Rr, B); } break;
+        case 10: if (centerIn) { link(L, T); link(Rr, B); } else { link(T, Rr); link(L, B); } break;
+      }
+    }
+    const pointOf = (e) => {
+      let i0, j0, i1, j1;
+      if (e < H0) { j0 = j1 = Math.floor(e / nx); i0 = e % nx; i1 = i0 + 1; }
+      else { const f = e - H0; j0 = Math.floor(f / nx); i0 = i1 = f % nx; j1 = j0 + 1; }
+      const va = v[j0 * nx + i0], vb = v[j1 * nx + i1], t = va === vb ? 0.5 : U.clamp(va / (va - vb), 0, 1);
+      return [ox + (i0 + (i1 - i0) * t) * st - b.x, oz + (j0 + (j1 - j0) * t) * st - b.y];
+    };
+    const seen = new Set(), loops = [];
+    for (const start of adj.keys()) {
+      if (seen.has(start)) continue;
+      const ids = [start];
+      seen.add(start);
+      let prev = -1, cur = start;
+      for (let guard = 0; guard < 100000; guard++) {
+        const nb = adj.get(cur);
+        const next = nb[0] !== prev ? nb[0] : nb[1];
+        if (next === undefined || next === start) break;
+        if (seen.has(next)) break;
+        seen.add(next); ids.push(next); prev = cur; cur = next;
+      }
+      if (ids.length < 8) continue;
+      let pts = ids.map(pointOf);
+      // orientation : l'extérieur doit être à droite du sens de parcours
+      let outN = 0, n = 0;
+      for (let k = 0; k < pts.length; k += Math.max(1, Math.floor(pts.length / 12))) {
+        const p = pts[k], q = pts[(k + 1) % pts.length], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz) || 1;
+        if (DZ.encSDF(b, b.x + (p[0] + q[0]) / 2 + dz / l * 0.06, b.y + (p[1] + q[1]) / 2 - dx / l * 0.06, sh) > offset) outN++;
+        n++;
+      }
+      if (outN < n / 2) pts.reverse();
+      loops.push(resampleLoop(pts, spacing));
+    }
+    return loops;
   };
+  /* Le segment [p, q] (coordonnées locales) traverse-t-il une ouverture de passerelle ? */
+  function inGate(b, gates, p, q) {
+    if (!gates || !gates.length) return false;
+    const x = b.x + (p[0] + q[0]) / 2, z = b.y + (p[1] + q[1]) / 2;
+    for (const g of gates) if (x > g.x0 && x < g.x1 && z > g.y0 && z < g.y1) return true;
+    return false;
+  }
 
   /* Suit une polyligne fermée : fn(x, z, angle, longueur, index, normale). */
   function alongLoop(pts, fn) {
@@ -427,10 +504,12 @@
     if (def.kind === 'air') return aviary(mb, glass, b, out);
     if (def.kind === 'water') return lagoon(mb, glass, b, out);
     const spacing = lv === 1 ? 0.34 : lv === 2 ? 0.5 : 0.62;
-    const pts = G.encContour(b, -0.05, spacing);
-    const sh = DZ.encShape(b);
+    const loops = G.encLoops(b, -0.05, spacing);
+    const sh0 = DZ.encShape(b), sh = sh0.main || sh0;
+    const gates = world && world.game && world.game.gatesOf && b.id > 0 ? world.game.gatesOf(b) : [];
     const front = [];
-    alongLoop(pts, (x, z, ang, len, i, nrm, q) => {
+    for (const pts of loops) alongLoop(pts, (x, z, ang, len, i, nrm, q) => {
+      if (inGate(b, gates, [x, z], q)) return;
       mb.push().t(x, 0, z).ry(-ang);
       if (lv === 1) {
         mb.material('wood').col(i % 2 ? '#8a6240' : '#7a5636').push().rz((U.hash(i, 3, b.seed) - 0.5) * 0.08).cyl(0.03, 0.026, 0.32 + U.hash(i, 1, b.seed) * 0.05, 6).pop();
@@ -467,7 +546,7 @@
     }
     if (front.length) for (let k = 0; k < front.length; k += 4) out.lights.push([b.x + front[k][0], 0.7, b.y + front[k][1] + 0.3, 1.4]);
     // mangeoire à l'intérieur
-    const fx = sh.cx - b.x + sh.hw * 0.45, fz = sh.cy - b.y + sh.hh * 0.45;
+    const fx = sh.cx - b.x + sh.hw * 0.45 * (gates.length ? -1 : 1), fz = sh.cy - b.y + sh.hh * 0.45;
     mb.push().t(fx, 0, fz).ry(0.4);
     mb.material('wood').col('#5a4028').box(0.42, 0.1, 0.16);
     mb.material('plain').col('#b8a050').push().t(0, 0.1, 0).box(0.38, 0.03, 0.12).pop();
@@ -531,12 +610,13 @@
   }
 
     /* Décor intérieur des enclos (rochers et arbres), déterministe. */
-  G.enclosureDecor = function (b) {
+  G.enclosureDecor = function (b, gates) {
     const def = C.buildings[b.type], lv = b.level;
     const r = U.rng(b.seed + lv * 7);
     const area = b.w * b.h, out = [];
     const sh = DZ.encShape(b);
-    const inside = () => { for (let k = 0; k < 30; k++) { const p = { x: b.x + 0.7 + r() * (b.w - 1.4), z: b.y + 0.7 + r() * (b.h - 1.3) }; if (DZ.encSDF(b, p.x, p.z, sh) < -0.9) return p; } return { x: sh.cx, z: sh.cy }; };
+    const free = (p) => !gates || !gates.some((g) => p.x > g.x0 - 0.6 && p.x < g.x1 + 0.6 && p.z > g.y0 - 0.6 && p.z < g.y1 + 0.6);
+    const inside = () => { for (let k = 0; k < 30; k++) { const p = { x: b.x + 0.7 + r() * (b.w - 1.4), z: b.y + 0.7 + r() * (b.h - 1.3) }; if (DZ.encSDF(b, p.x, p.z, sh) < -0.9 && free(p)) return p; } return { x: sh.cx, z: sh.cy }; };
     if (def.kind === 'land') {
       const rocks = Math.round(area / 9) + (lv >= 2 ? 1 : 0);
       for (let i = 0; i < rocks; i++) { const p = inside(); out.push({ t: 'rock', x: p.x, z: p.z, size: r() < 0.3 && area > 12 ? 'L' : r() < 0.6 ? 'M' : 'S', sd: (r() * 1000) | 0 }); }
@@ -716,5 +796,102 @@
     mb.material('plain').col('#f2c230').push().t(w / 2, 0, -0.05).box(0.4, 0.28, 0.02).pop();
     mb.col('#1e1e1e').push().t(w / 2, 0.08, -0.062).box(0.3, 0.04, 0.004).pop();
     return mb.finish();
+  };
+
+  /* ------------------------------------------------------------------
+     Passerelle entre deux enclos : tablier surélevé à parois vitrées,
+     piliers (jamais sur les allées), rampes dans chaque enclos et
+     portiques à chaque entrée. deckY : hauteur absolue du tablier.
+     ------------------------------------------------------------------ */
+  G.linkDeckY = function (game, world, l) {
+    const A = game.buildings[l.a], B = game.buildings[l.b], K = C.links;
+    let top = Math.max(A ? world.buildingHeight(A) : 0, B ? world.buildingHeight(B) : 0);
+    for (let y = l.y; y < l.y + l.h; y++) for (let x = l.x; x < l.x + l.w; x++) for (const f of [0.2, 0.5, 0.8]) top = Math.max(top, world.heightAt(x + f, y + f));
+    return top + K.clearance;
+  };
+  G.linkInto = function (mb, glass, l, world, game, out) {
+    const K = C.links, ax = game.linkAxis(l), L = ax.a1 - ax.a0, half = l.dir === 'x' ? l.h / 2 - 0.1 : l.w / 2 - 0.1;
+    const A = game.buildings[l.a], B = game.buildings[l.b];
+    const hA = A ? world.buildingHeight(A) : 0, hB = B ? world.buildingHeight(B) : 0;
+    const Yd = G.linkDeckY(game, world, l);
+    // repère local : x le long de la passerelle (0 = clôture du premier enclos), z en travers
+    const toWorld = (u, v) => l.dir === 'x' ? [ax.a0 + u, ax.c + v] : [ax.c - v, ax.a0 + u];
+    const ground = (u, v) => { const p = toWorld(u, v); return world.heightAt(p[0], p[1]); };
+    mb.push();
+    if (l.dir === 'x') mb.t(ax.a0, 0, ax.c); else mb.t(ax.c, 0, ax.a0).ry(-Math.PI / 2);
+    const portal = (u, base) => {
+      const top = (L ? Yd : base) + 1.05;
+      mb.material('metal').col('#3f474c');
+      for (const s of [-1, 1]) {
+        const g = ground(u, s * (half + 0.08));
+        mb.push().t(u, g, s * (half + 0.08)).box(0.09, top - g, 0.09).pop();
+      }
+      mb.push().t(u, top, 0).box(0.12, 0.1, half * 2 + 0.3).pop();
+      mb.material('plain').col('#3d7a4a').push().t(u, top - 0.2, 0).box(0.04, 0.16, 0.7).pop();
+      mb.material('emissive').col('#ffe2a0');
+      for (const s of [-1, 1]) mb.push().t(u, top + 0.1, s * (half + 0.08)).sphere(0.03, 0.03, 0.03, 5, 3).pop();
+      const p = toWorld(u, 0);
+      out.lights.push([p[0], top + 0.1, p[1], 1.5]);
+    };
+    if (!L) {
+      // simple porte entre deux enclos qui se touchent
+      const g = Math.max(hA, hB);
+      portal(0, g);
+      mb.material('stone').col('#9a968c').push().t(0, g - 0.02, 0).box(0.3, 0.05, half * 2).pop();
+      mb.pop();
+      return out;
+    }
+    // tablier et poutres latérales
+    mb.material('wood').col('#8a6545').push().t(L / 2, Yd - 0.08, 0).box(L + 0.08, 0.08, half * 2).pop();
+    mb.material('wood').col('#6f5036');
+    for (let u = 0.25; u < L; u += 0.5) mb.push().t(u, Yd + 0.001, 0).box(0.02, 0.002, half * 2 - 0.05).pop();
+    mb.material('metal').col('#4a5257');
+    for (const s of [-1, 1]) mb.push().t(L / 2, Yd - 0.2, s * half).box(L + 0.1, 0.14, 0.08).pop();
+    // parois : montants, mains courantes et verre
+    const n = Math.max(2, Math.round(L / 0.55));
+    for (const s of [-1, 1]) {
+      for (let i = 0; i <= n; i++) mb.push().t(L * i / n, Yd, s * half).box(0.04, 0.62, 0.04).pop();
+      mb.push().t(L / 2, Yd + 0.62, s * half).box(L + 0.04, 0.035, 0.06).pop();
+      mb.push().t(L / 2, Yd + 0.31, s * half).box(L, 0.018, 0.02).pop();
+      glass.push(); glass.m = G.m4.copy(mb.m); glass.material('glass').col('#bfe0ea');
+      if (s > 0) glass.face([0, Yd + 0.04, s * half], [L, Yd + 0.04, s * half], [L, Yd + 0.6, s * half], [0, Yd + 0.6, s * half]);
+      else glass.face([L, Yd + 0.04, s * half], [0, Yd + 0.04, s * half], [0, Yd + 0.6, s * half], [L, Yd + 0.6, s * half]);
+      glass.pop();
+    }
+    // piliers : aux extrémités et tous les 3 m, jamais au milieu d'une allée
+    const posts = [0.3, L - 0.3];
+    for (let u = 3; u < L - 1; u += 3) posts.push(u);
+    for (const u of posts) {
+      const onPath = [-1, 1].some((s) => { const p = toWorld(u, s * (half - 0.15)); return game.isPath(Math.floor(p[0]), Math.floor(p[1])); });
+      if (onPath) continue;
+      mb.material('stone').col('#a9a59b');
+      for (const s of [-1, 1]) { const g = ground(u, s * (half - 0.15)); mb.push().t(u, g - 0.05, s * (half - 0.15)).cyl(0.09, 0.11, Yd - 0.2 - g + 0.05, 8).pop(); }
+      mb.material('metal').col('#4a5257').push().t(u, Yd - 0.3, 0).box(0.12, 0.1, half * 2).pop();
+    }
+    // rampes (une dans chaque enclos)
+    const ramp = (u0, u1, h0, h1) => {
+      mb.material('wood').col('#7d5c3e');
+      const lo = Math.min(h0, h1) - 0.04;
+      // dessus incliné, flancs et face haute
+      mb.face([u0, h0, half], [u1, h1, half], [u1, h1, -half], [u0, h0, -half]);
+      mb.col('#5f4530');
+      mb.face([u0, lo, half], [u1, lo, half], [u1, h1, half], [u0, h0, half]);
+      mb.face([u1, lo, -half], [u0, lo, -half], [u0, h0, -half], [u1, h1, -half]);
+      const hi = h0 > h1 ? u0 : u1, hy = Math.max(h0, h1);
+      if (hi === u1) mb.face([u1, lo, half], [u1, lo, -half], [u1, hy, -half], [u1, hy, half]);
+      else mb.face([u0, lo, -half], [u0, lo, half], [u0, hy, half], [u0, hy, -half]);
+      // garde-corps le long de la pente
+      mb.material('metal').col('#3f474c');
+      for (const s of [-1, 1]) {
+        mb.tube([[u0, h0 + 0.55, s * half], [u1, h1 + 0.55, s * half]], 0.018, 0.018, 4);
+        for (const u of [u0, (u0 + u1) / 2, u1]) { const y = h0 + (h1 - h0) * (u - u0) / (u1 - u0); mb.push().t(u, y, s * half).box(0.035, 0.56, 0.035).pop(); }
+      }
+    };
+    ramp(-K.ramp, 0, hA + 0.01, Yd);
+    ramp(L, L + K.ramp, Yd, hB + 0.01);
+    portal(0, hA);
+    portal(L, hB);
+    mb.pop();
+    return out;
   };
 })();

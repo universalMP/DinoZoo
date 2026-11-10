@@ -360,11 +360,11 @@
      ------------------------------------------------------------------ */
   const encCache = {};
   R.enclosureArt = function (b) {
-    const key = b.id + '_' + b.level + '_' + b.type;
+    const key = b.id + '_' + b.level + '_' + b.type + '_' + b.x + '_' + b.y + '_' + b.w + '_' + b.h;
     if (encCache[key]) return encCache[key];
     const def = DZ.CONFIG.buildings[b.type];
     const W = b.w * T, H = b.h * T, lv = b.level;
-    const art = { decor: [], lights: [] };
+    const art = { decor: [], lights: [], edges: b.parts ? unionEdges(b) : null };
     const kind = def.kind;
     const fh = kind === 'air' ? 0 : lv === 1 ? 15 : lv === 2 ? 30 : 26;
     const above = kind === 'air' ? 90 : 44;
@@ -376,7 +376,13 @@
     // décor intérieur (coordonnées en cases)
     const r = U.rng(b.seed + lv * 7);
     const area = b.w * b.h;
-    const inside = () => ({ x: b.x + 0.7 + r() * (b.w - 1.4), y: b.y + 1.0 + r() * (b.h - 1.4) });
+    const inside = () => {
+      for (let k = 0; k < 20; k++) {
+        const p = { x: b.x + 0.7 + r() * (b.w - 1.4), y: b.y + 1.0 + r() * (b.h - 1.4) };
+        if (!b.parts || (DZ.encSDF(b, p.x, p.y) < -0.8 && !(b.id > 0 && DZ.app && DZ.app.game.gatesOf(b).some((q) => p.x > q.x0 - 0.5 && p.x < q.x1 + 0.5 && p.y > q.y0 - 0.5 && p.y < q.y1 + 0.5)))) return p;
+      }
+      return { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+    };
     if (kind === 'land') {
       const rocks = Math.round(area / 9) + (lv >= 2 ? 1 : 0);
       for (let i = 0; i < rocks; i++) { const p = inside(); art.decor.push({ t: 'rock', x: p.x, y: p.y, size: r() < 0.3 && area > 12 ? 'L' : r() < 0.6 ? 'M' : 'S', sd: (r() * 1000) | 0 }); }
@@ -393,11 +399,38 @@
     return art;
   };
 
+  /* Bords extérieurs d'un enclos réuni (en pixels, relatifs à l'emprise). */
+  function unionEdges(b) {
+    const inside = (x, y) => DZ.encParts(b).some(([px, py, pw, ph]) => x >= px && x < px + pw && y >= py && y < py + ph);
+    const hz = [], vt = [];
+    for (let y = b.y; y <= b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) {
+      const a = inside(x, y - 1), c = inside(x, y);
+      if (a !== c) hz.push([x, y, c ? 'top' : 'bottom']);
+    }
+    for (let x = b.x; x <= b.x + b.w; x++) for (let y = b.y; y < b.y + b.h; y++) if (inside(x - 1, y) !== inside(x, y)) vt.push([x, y]);
+    const back = [], front = [];
+    // fusion des segments contigus
+    hz.sort((p, q) => p[1] - q[1] || (p[2] < q[2] ? -1 : p[2] > q[2] ? 1 : p[0] - q[0]));
+    for (let i = 0; i < hz.length;) {
+      let j = i; while (j + 1 < hz.length && hz[j + 1][1] === hz[i][1] && hz[j + 1][2] === hz[i][2] && hz[j + 1][0] === hz[j][0] + 1) j++;
+      const e = [(hz[i][0] - b.x) * T, (hz[i][1] - b.y) * T, (hz[j][0] + 1 - b.x) * T, (hz[i][1] - b.y) * T];
+      (hz[i][2] === 'bottom' && hz[i][1] === b.y + b.h ? front : back).push(e);
+      i = j + 1;
+    }
+    vt.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+    for (let i = 0; i < vt.length;) {
+      let j = i; while (j + 1 < vt.length && vt[j + 1][0] === vt[i][0] && vt[j + 1][1] === vt[j][1] + 1) j++;
+      back.push([(vt[i][0] - b.x) * T, (vt[i][1] - b.y) * T, (vt[i][0] - b.x) * T, (vt[j][1] + 1 - b.y) * T]);
+      i = j + 1;
+    }
+    return { back, front };
+  }
+
   function fence(g, W, H, lv, kind, side, art) {
     if (kind === 'air') return aviaryNet(g, W, H, lv, side);
     const fh = lv === 1 ? 15 : lv === 2 ? 30 : 26;
     const back = side === 'back';
-    const edges = back ? [[0, 0, W, 0], [0, 0, 0, H], [W, 0, W, H]] : [[0, H, W, H]];
+    const edges = art.edges ? (back ? art.edges.back : art.edges.front) : back ? [[0, 0, W, 0], [0, 0, 0, H], [W, 0, W, H]] : [[0, H, W, H]];
     if (kind === 'water') return lagoonRim(g, W, H, lv, side, edges);
     for (const [ax, ay, bx, by] of edges) {
       const len = Math.hypot(bx - ax, by - ay);

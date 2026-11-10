@@ -171,6 +171,35 @@ DZ.CONFIG = {
     babyValue: 0.4                    // valeur d'un bébé (fraction du prix)
   },
 
+  /* ---------- Passerelles et enclos réunis ---------- */
+  links: {
+    base: 1800,               // prix fixe d'une passerelle
+    perTile: 520,             // et par case franchie
+    gateFactor: 0.45,         // simple porte entre deux enclos qui se touchent
+    maxLen: 10,               // longueur maximale (cases)
+    width: 2,                 // largeur du tablier (cases)
+    clearance: 0.62,          // hauteur du tablier au-dessus du sol (les visiteurs passent dessous)
+    ramp: 1.6,                // longueur des rampes, à l'intérieur des enclos
+    crossChance: 0.03,        // probabilité, à chaque nouvelle activité, d'aller dans l'enclos voisin
+    attraction: 14,           // dinosaures au-dessus des allées : spectacle pour les visiteurs
+    happiness: 4              // plus d'espace pour se promener
+  },
+  merge: {
+    base: 900,                // démontage de la clôture commune
+    perTile: 140,             // par case de clôture commune
+    minShared: 3              // longueur minimale du côté commun
+  },
+
+  /* ---------- Combats entre mâles adultes ---------- */
+  fights: {
+    rate: 0.16,               // combats par heure de jeu, pour une paire de mâles très territoriaux (× tempérament²)
+    calmHours: 5,             // trêve après un combat (le vainqueur domine)
+    injury: 0.35,             // risque de blessure du perdant (× tempérament)
+    rivalryPenalty: 8,        // bonheur perdu par les rivaux (× tempérament)
+    bruisePenalty: 12,        // bonheur perdu par le vaincu jusqu'au lendemain
+    noticeHours: 8            // pas plus d'une notification par enclos dans cet intervalle
+  },
+
   /* ---------- Directeur ou directrice du parc (avatar) ---------- */
   player: {
     walkSpeed: 2.4,           // cases par seconde de jeu ; accélère sur les longues distances

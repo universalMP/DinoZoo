@@ -18,6 +18,7 @@ Construisez des chemins depuis l'entrée, des enclos reliés à ces chemins, pui
 - **Votre avatar** (nom, genre et tenue choisis à chaque partie) se rend sur chaque chantier et auprès de chaque dinosaure.
 - **Des chantiers qui prennent du temps** selon le prix, et des dinosaures **livrés par hélicoptère**.
 - **Des naissances** : un mâle et une femelle heureux de la même espèce ont des petits, qui grandissent.
+- **Des passerelles** entre enclos (les dinosaures passent au-dessus des allées), des **enclos réunis** quand ils se touchent, et des **combats entre mâles** chez les espèces territoriales.
 - **3 niveaux** pour chaque enclos, boutique, restaurant et toilettes.
 - Événements aléatoires : affluence, orages, maladies, critiques, mécènes… et évasions si vos clôtures sont trop faibles.
 - Cycle jour et nuit, météo.
@@ -58,6 +59,7 @@ js/config.js        équilibrage et palette (à modifier pour rééquilibrer)
 js/dinos.js         données des espèces
 js/util.js          outils (aléatoire, bruit, couleurs)
 js/game.js          logique de jeu (sans rendu)
+js/habitats.js      passerelles, enclos réunis, combats entre mâles
 js/r3d/             rendu 3D WebGL 2 : socle (maths, shaders), maillages, terrain et eau,
                     modèles (bâtiments, arbres, visiteurs), dinosaures articulés, moteur
 js/render/          rendu 2D de secours (et dessins des vignettes 2D, bulles d'humeur)

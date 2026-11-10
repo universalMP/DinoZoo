@@ -20,7 +20,7 @@ window.DZ = window.DZ || {};
     },
     {
       title: 'Votre premier dinosaure',
-      text: 'Dans l\'onglet <b>Dinosaures</b>, choisissez le <b>Compsognathus</b> ou le <b>Dryosaurus</b>, puis cliquez sur votre enclos. Il sera livré par hélicoptère ! Un mâle et une femelle de la même espèce auront des petits.',
+      text: 'Dans l\'onglet <b>Dinosaures</b>, choisissez le <b>Compsognathus</b> ou le <b>Dryosaurus</b>, puis cliquez sur votre enclos. Il sera livré par hélicoptère ! Un mâle et une femelle de la même espèce auront des petits (mais deux mâles finiront par se battre).',
       todo: 'Installer un dinosaure',
       check: (g) => g.dinos.length > 0,
       highlight: '[data-tab="dinos"]',
