@@ -342,10 +342,13 @@
         const def = C.buildings[b.type];
         const bx = b.x * T, by = b.y * T, bw = b.w * T, bh = b.h * T;
         if (!(bx + bw > v.x0 - 120 && bx < v.x1 + 120 && by + bh > v.y0 - 60 && by < v.y1 + 160)) continue;
+        const prog = b.cons ? game.worksProgress(b) : 1;
+        if (game.busy(b) && def.cat !== 'deco') out.push({ y: by + bh + 0.6, draw: (g) => self.scaffold2D(g, bx, by, bw, bh, def.cat === 'enclos' ? 26 : 46) });
         if (def.cat === 'enclos') {
           const art = R.enclosureArt(b);
-          out.push({ y: by + 1, draw: (g) => R.draw(g, art.back, bx, by) });
-          out.push({ y: by + bh - 0.5, draw: (g) => R.draw(g, art.front, bx, by) });
+          const a = b.cons ? 0.25 + 0.75 * prog : 1;
+          out.push({ y: by + 1, draw: (g) => { g.globalAlpha = a; R.draw(g, art.back, bx, by); g.globalAlpha = 1; } });
+          out.push({ y: by + bh - 0.5, draw: (g) => { g.globalAlpha = a; R.draw(g, art.front, bx, by); g.globalAlpha = 1; } });
           for (const l of art.lights) this.lights.push([bx + l[0], by + l[1], l[2]]);
           for (const d of art.decor) {
             if (d.t === 'tree') out.push(this.treeObj(d.k, d.sd, d.sc, d.x * T, d.y * T, t, wind));
@@ -363,8 +366,14 @@
           out.push({
             y: by + bh - (b.type === 'banc' || b.type === 'poubelle' ? 12 : 2),
             draw: (g) => {
-              g.drawImage(sp.c, bx - sp.ox, by - sp.oy, sp.w, sp.h);
-              if (!game.isConnected(b) && def.cat === 'service') self.warnIcon(g, bx + bw / 2, by - 30, t);
+              if (b.cons) {
+                // le bâtiment sort de terre : seule la partie basse est dessinée
+                const k = 0.08 + 0.92 * prog, hh = sp.h * k;
+                g.globalAlpha = 0.55 + 0.45 * prog;
+                g.drawImage(sp.c, 0, (sp.c.height) * (1 - k), sp.c.width, sp.c.height * k, bx - sp.ox, by - sp.oy + sp.h - hh, sp.w, hh);
+                g.globalAlpha = 1;
+              } else g.drawImage(sp.c, bx - sp.ox, by - sp.oy, sp.w, sp.h);
+              if (!game.isConnected(b) && def.cat === 'service' && !b.cons) self.warnIcon(g, bx + bw / 2, by - 30, t);
             },
             shadow: (g, sun) => this.shadowRect(g, bx, by, bw, bh, info.h || 20, sun)
           });
@@ -381,6 +390,9 @@
         if (!vis(x, y, 160)) continue;
         out.push(this.dinoObj(d, x, y, t));
       }
+      // avatar du directeur ou de la directrice
+      const pl = game.pl;
+      if (pl && vis(pl.x * T, pl.y * T, 40)) out.push({ y: pl.y * T, draw: (g) => self.avatar2D(g, pl, t), shadow: (g, sun) => this.shadowEllipse(g, pl.x * T, pl.y * T, 6, 2.4, sun, 9) });
       // visiteurs
       const frames = R.PEOPLE_FRAMES;
       for (const grp of game.visitors) {
@@ -431,6 +443,13 @@
     }
 
     dinoObj(d, x, y, t) {
+      const o = this.dinoObj0(d, x, y, t), k = this.game.dinoScale(d);
+      if (k >= 1) return o;
+      const draw = o.draw;
+      o.draw = (g) => { g.save(); g.translate(x, y); g.scale(k, k); g.translate(-x, -y); draw(g); g.restore(); };
+      return o;
+    }
+    dinoObj0(d, x, y, t) {
       const rig = R.dinoRig(d.sp);
       const sp = DZ.SPECIES[d.sp];
       const self = this;
@@ -659,8 +678,96 @@
       g.fillStyle = vg; g.fillRect(0, 0, W2, H2);
     }
 
+    scaffold2D(g, bx, by, bw, bh, hgt) {
+      g.save();
+      g.strokeStyle = 'rgba(140,145,150,0.9)'; g.lineWidth = 1.6;
+      const top = by + bh - hgt;
+      for (const x of [bx + 3, bx + bw / 2, bx + bw - 3]) { g.beginPath(); g.moveTo(x, by + bh); g.lineTo(x, top - (by + bh - top) * 0); g.stroke(); }
+      for (let l = 1; l <= 3; l++) { const y = by + bh - hgt * l / 3; g.strokeStyle = 'rgba(140,145,150,0.9)'; g.beginPath(); g.moveTo(bx + 3, y); g.lineTo(bx + bw - 3, y); g.stroke(); g.fillStyle = '#a98250'; g.fillRect(bx + 3, y - 2, bw - 6, 2.5); }
+      g.restore();
+    }
+    avatar2D(g, p, t) {
+      const pl = this.game.s.player, A = (DZ.AVATARS[pl.avatar] || DZ.AVATARS[0]);
+      const x = p.x * T, y = p.y * T, S = 1.35;
+      const walking = p.state === 'walk', sw = walking ? Math.sin(p.phase) * 3 : 0;
+      const work = p.state === 'work' && p.cur ? p.cur.act : null;
+      g.save(); g.translate(x, y); g.scale(S * (p.dirX < -0.05 ? -1 : 1), S);
+      // halo
+      g.fillStyle = `rgba(255,214,102,${0.35 + Math.sin(t * 3) * 0.12})`; g.beginPath(); g.ellipse(0, 0, 8, 3, 0, 0, TAU); g.fill();
+      g.strokeStyle = A.bottom; g.lineWidth = 3; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(-1.5, -9); g.lineTo(-1.5 - sw, -1); g.moveTo(1.5, -9); g.lineTo(1.5 + sw, -1); g.stroke();
+      g.fillStyle = A.top; g.beginPath(); g.ellipse(0, -14, pl.gender === 'f' ? 4.2 : 4.8, 6.5, 0, 0, TAU); g.fill();
+      // bras qui travaille
+      const arm = work === 'build' || work === 'demolish' ? -1.2 - Math.max(0, Math.sin(p.anim * 7.5)) * 1.2 : work === 'receive' ? -2.6 + Math.sin(p.anim * 9) * 0.3 : walking ? Math.sin(p.phase) * 0.5 : 0.2;
+      g.save(); g.translate(4, -18); g.rotate(-arm); g.strokeStyle = A.top; g.lineWidth = 2.4; g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 7); g.stroke();
+      if (work === 'build' || work === 'demolish') { g.fillStyle = '#7d8186'; g.fillRect(-2, 7, 5, 2.2); }
+      g.restore();
+      g.fillStyle = A.skin; g.beginPath(); g.arc(0, -23.5, 3.6, 0, TAU); g.fill();
+      g.fillStyle = A.hair; g.beginPath(); g.arc(0, -24.5, 3.7, Math.PI, TAU); g.fill();
+      if (pl.gender === 'f') { g.beginPath(); g.ellipse(-3, -21.5, 1.6, 3.2, 0.3, 0, TAU); g.fill(); }
+      if (A.hat) { g.fillStyle = A.hatCol; g.fillRect(-5.5, -26.5, 11, 1.6); g.fillRect(-3.4, -29.5, 6.8, 3.2); }
+      g.restore();
+    }
+    heli2D(g, p, dl, t) {
+      const x = p.x * T, gy = p.y * T, y = gy - (0.6 + p.alt * 8.5) * 22;
+      // ombre au sol
+      g.fillStyle = 'rgba(0,0,0,0.22)'; g.beginPath(); g.ellipse(x, gy, 26, 8, 0, 0, TAU); g.fill();
+      const tx = dl.x * T, ty = dl.y * T;
+      // câble et caisse
+      if (p.crate || p.cable > 0) {
+        const drop = p.cable * (ty - 14 - (y + 10));
+        const cy = y + 10 + drop;
+        if (drop > 1) { g.strokeStyle = '#2a2a2a'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y + 8); g.lineTo(x, cy); g.stroke(); }
+        if (p.crate) { g.fillStyle = '#a07848'; g.fillRect(x - 9, cy, 18, 14); g.strokeStyle = '#55595e'; g.lineWidth = 1.5; g.strokeRect(x - 9, cy, 18, 14); }
+      }
+      const dir = Math.cos(p.heading) >= 0 ? 1 : -1;
+      g.save(); g.translate(x, y); g.scale(dir, 1); g.rotate(p.tilt * 0.6);
+      g.strokeStyle = '#e9e6dd'; g.lineWidth = 4; g.beginPath(); g.moveTo(-6, -2); g.lineTo(-34, -6); g.stroke();
+      g.fillStyle = '#b8432d'; g.fillRect(-38, -14, 5, 10);
+      g.fillStyle = '#e9e6dd'; g.beginPath(); g.ellipse(0, 0, 16, 9, 0, 0, TAU); g.fill();
+      g.fillStyle = '#b8432d'; g.fillRect(-12, 1, 24, 3);
+      g.fillStyle = '#7fa8b8'; g.beginPath(); g.ellipse(8, -2, 7, 5.5, 0, 0, TAU); g.fill();
+      g.strokeStyle = '#26282b'; g.lineWidth = 1.6; g.beginPath(); g.moveTo(-12, 11); g.lineTo(13, 11); g.stroke();
+      g.restore();
+      // rotor : disque flou qui tourne
+      g.save(); g.translate(x, y - 11);
+      g.fillStyle = 'rgba(40,40,40,0.12)'; g.beginPath(); g.ellipse(0, 0, 34, 6, 0, 0, TAU); g.fill();
+      const a = t * 40; g.strokeStyle = 'rgba(30,30,30,0.6)'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(Math.cos(a) * 34, Math.sin(a) * 6); g.lineTo(-Math.cos(a) * 34, -Math.sin(a) * 6); g.stroke();
+      g.restore();
+      if (p.phase === 'hover' && Math.random() < 0.5) { const an = Math.random() * TAU; this.addP({ k: 'dust', x: tx + Math.cos(an) * 20, y: ty + Math.sin(an) * 8, vx: Math.cos(an) * 30, vy: Math.sin(an) * 8, life: 0, max: 0.9, s: 5 }); }
+    }
+
     drawOverlays(g, t) {
       const game = this.game;
+      const zi = 1 / this.cam.zoom;
+      // chantiers
+      for (const id in game.buildings) {
+        const b = game.buildings[id];
+        if (!game.busy(b) || C.buildings[b.type].cat === 'deco') continue;
+        const p = game.worksProgress(b), x = (b.x + b.w / 2) * T, y = b.y * T - 34;
+        if (!this.isVisible(x, y, 80)) continue;
+        g.save(); g.translate(x, y); g.scale(zi, zi);
+        g.fillStyle = 'rgba(20,24,18,0.75)'; g.fillRect(-36, -20, 72, 28);
+        g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(-30, -2, 60, 5);
+        g.fillStyle = '#e6bb5c'; g.fillRect(-30, -2, 60 * p, 5);
+        g.font = '600 11px "Trebuchet MS", sans-serif'; g.textAlign = 'center'; g.fillStyle = '#fff6e0';
+        g.fillText(b.upg ? `⬆ Niv. ${b.level + 1} · ${Math.round(p * 100)} %` : `🚧 ${Math.round(p * 100)} %`, 0, -7);
+        g.restore();
+      }
+      // hélicoptères
+      for (const dl of game.s.deliveries) { const p = game.deliveryPose(dl); if (p) this.heli2D(g, p, dl, t); }
+      // nom de l'avatar
+      const pl = game.pl;
+      if (pl && this.cam.zoom > 0.55) {
+        const av = DZ.avatarOf(game.s.player), label = `${av.emoji} ${game.s.player.name}`;
+        g.save(); g.translate(pl.x * T, pl.y * T - 46); g.scale(zi, zi);
+        g.font = '600 12px "Trebuchet MS", sans-serif'; g.textAlign = 'center';
+        const tw = g.measureText(label).width + 14;
+        g.fillStyle = 'rgba(230,187,92,0.92)'; g.fillRect(-tw / 2, -14, tw, 19);
+        g.fillStyle = '#2a1e10'; g.fillText(label, 0, 0);
+        g.restore();
+      }
       // enclos valides lors du placement d'un dinosaure
       if (this.highlightEnclosures) {
         for (const id in game.buildings) {

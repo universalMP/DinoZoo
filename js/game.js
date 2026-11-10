@@ -215,10 +215,12 @@ window.DZ = window.DZ || {};
     }
 
     /* ---------- Nouvelle partie / chargement ---------- */
-    newGame(seed) {
+    newGame(seed, player) {
       seed = seed || ((Math.random() * 1e9) | 0);
       this.s = {
         version: 2, seed, mapGen: 2, day: 1, hour: C.time.startHour,
+        player: Object.assign({ name: 'Directeur', gender: 'h', avatar: 0, set: false }, player || {}),
+        deliveries: [], nextDel: 1, births: [],
         money: C.economy.startMoney, totalEarned: 0, rating: C.rating.start,
         buildings: {}, nextId: 1, dinos: [], nextDinoId: 1, nameIdx: Math.floor(Math.random() * 40),
         unlocked: {}, lastGrant: -99, history: [], today: null,
@@ -237,9 +239,16 @@ window.DZ = window.DZ || {};
       for (let x = ENT.tileX - 7; x <= ENT.tileX + 7; x++) this._setPath(x, top);
       this._removeTreesIn(ENT.x - 1, ENT.y - 1, ENT.w + 2, ENT.h + 1);
       this._netChanged();
+      this._initPlayer();
       this.checkUnlocks(true);
       this.startDay(true);
       this.emit('reset');
+    }
+
+    /* Profil du joueur (nom, genre, avatar) choisi au début d'une partie. */
+    setPlayer(p) {
+      Object.assign(this.s.player, p, { set: true });
+      this.emit('player', this.s.player);
     }
 
     _genMap(seed, gen) {
@@ -268,7 +277,13 @@ window.DZ = window.DZ || {};
         delete data.pathStr; delete data.litterStr;
         this.occ = new Int32Array(W * H);
         this._rebuildOcc();
-        for (const d of this.s.dinos) this._initDinoTransient(d);
+        // champs ajoutés au fil des versions
+        if (!data.player) data.player = { name: 'Directeur', gender: 'h', avatar: 0, set: false };
+        if (!data.deliveries) data.deliveries = [];
+        if (!data.nextDel) data.nextDel = 1;
+        if (!data.births) data.births = [];
+        for (const d of this.s.dinos) { if (!d.sex) d.sex = d.id % 2 ? 'M' : 'F'; this._initDinoTransient(d); }
+        this._initPlayer();
         this.visitors = [];
         this._netChanged();
         this.dailyTarget = this.computeDailyTarget();
@@ -287,12 +302,14 @@ window.DZ = window.DZ || {};
       for (let i = 0; i < W * H; i++) { pathStr += this.path[i] ? '1' : '0'; litterStr += String.fromCharCode(48 + Math.min(9, this.litter[i])); }
       const dinos = s.dinos.map((d) => ({
         id: d.id, sp: d.sp, enc: d.enc, name: d.name, x: d.x, y: d.y, face: d.face,
-        upHab: d.upHab, upCare: d.upCare, sick: d.sick, sickDays: d.sickDays, happiness: d.happiness, born: d.born
+        upHab: d.upHab, upCare: d.upCare, sick: d.sick, sickDays: d.sickDays, happiness: d.happiness, born: d.born,
+        sex: d.sex, young: d.young ? 1 : 0
       }));
+      if (this.pl) { s.player.x = Math.round(this.pl.x * 100) / 100; s.player.y = Math.round(this.pl.y * 100) / 100; }
       const buildings = {};
       for (const id in s.buildings) {
         const b = s.buildings[id];
-        buildings[id] = { id: b.id, type: b.type, x: b.x, y: b.y, w: b.w, h: b.h, level: b.level, invested: b.invested, seed: b.seed, fixed: b.fixed, built: b.built, earned: Math.round(b.earned || 0) };
+        buildings[id] = { id: b.id, type: b.type, x: b.x, y: b.y, w: b.w, h: b.h, level: b.level, invested: b.invested, seed: b.seed, fixed: b.fixed, built: b.built, earned: Math.round(b.earned || 0), cons: b.cons, upg: b.upg, breed: b.breed };
       }
       const cl = [];
       for (let i = 0; i < W * H; i++) if (this.cleared[i] && this.treeAt[i]) cl.push(i.toString(36));
@@ -406,10 +423,47 @@ window.DZ = window.DZ || {};
       const def = C.buildings[type];
       this._spend(def.cost, 'construction');
       const b = this._addBuilding(type, x, y, def.cost);
+      b.cons = { t: 0, dur: this.worksHours(def.cost) };
       this._removeTreesIn(x, y, def.w, def.h);
       this._netChanged({ x0: x - 1, y0: y - 1, x1: x + def.w, y1: y + def.h });
       this.emit('built', b);
+      this.playerTask(x + def.w / 2, y + def.h / 2, 'build', b.id);
       return { ok: true, building: b };
+    }
+
+    /* ---------- Chantiers : construction et amélioration prennent du temps ---------- */
+    worksHours(cost, upgrade) {
+      const K = C.construction;
+      return Math.min(K.maxHours, K.baseHours + cost / 1000 * K.hoursPer1000) * (upgrade ? K.upgradeFactor : 1);
+    }
+    busy(b) { return !!(b && (b.cons || b.upg)); }
+    worksProgress(b) { const w = b && (b.cons || b.upg); return w ? U.clamp(w.t / w.dur, 0, 1) : 1; }
+    worksLeft(b) { const w = b && (b.cons || b.upg); return w ? Math.max(0, w.dur - w.t) : 0; }
+
+    _updateWorks(dh) {
+      for (const id in this.s.buildings) {
+        const b = this.s.buildings[id];
+        const w = b.cons || b.upg;
+        if (!w) continue;
+        w.t += dh;
+        if (w.t < w.dur) continue;
+        const def = C.buildings[b.type];
+        const region = { x0: b.x - 1, y0: b.y - 1, x1: b.x + b.w, y1: b.y + b.h };
+        if (b.cons) {
+          delete b.cons;
+          b._conV = -1;
+          if (def.cat !== 'deco') this.notify('✅', `Construction terminée : ${def.name}.`, 'good', { type: 'select', building: b.id });
+          this.emit('constructed', b);
+          this.emit('mapChanged', region);
+        } else {
+          delete b.upg;
+          b.level++;
+          this._updateHappiness();
+          this.notify('✨', `Travaux terminés : ${def.name} au niveau ${b.level} !`, 'good', { type: 'select', building: b.id });
+          this.emit('upgraded', b);
+          this.emit('mapChanged', region);
+        }
+      }
     }
 
     isEnclosure(b) { return b && C.buildings[b.type].cat === 'enclos'; }
@@ -424,16 +478,16 @@ window.DZ = window.DZ || {};
     upgrade(id) {
       const b = this.s.buildings[id];
       if (!b) return { ok: false };
+      if (this.busy(b)) return { ok: false, reason: 'Des travaux sont déjà en cours' };
       const cost = this.upgradeCost(b);
       if (cost == null) return { ok: false, reason: 'Niveau maximal atteint' };
       if (this.s.money < cost) return { ok: false, reason: 'Fonds insuffisants' };
       this._spend(cost, 'construction');
-      b.level++;
       b.invested += cost;
-      this._updateHappiness();
-      this.emit('upgraded', b);
-      this.emit('mapChanged', { x0: b.x - 1, y0: b.y - 1, x1: b.x + b.w, y1: b.y + b.h });
-      return { ok: true };
+      b.upg = { t: 0, dur: this.worksHours(cost, true), to: b.level + 1 };
+      this.emit('upgradeStarted', b);
+      this.playerTask(b.x + b.w / 2, b.y + b.h / 2, 'build', b.id);
+      return { ok: true, hours: b.upg.dur };
     }
 
     demolish(id) {
@@ -441,8 +495,11 @@ window.DZ = window.DZ || {};
       if (!b || b.fixed) return { ok: false, reason: 'Ce bâtiment ne peut pas être démoli' };
       let refund = Math.round(b.invested * C.economy.refundRate);
       for (const d of this.s.dinos.filter((d) => d.enc === b.id)) refund += this._dinoValue(d) * C.economy.dinoSellRate;
+      for (const dl of this.s.deliveries) if (dl.enc === b.id && !dl.dropped && !dl.cancelled) { refund += C.dinos[dl.sp].price; dl.cancelled = true; }
+      this.s.deliveries = this.s.deliveries.filter((dl) => !(dl.cancelled && this.deliveryPhase(dl).phase === 'prep'));
       refund = Math.round(refund);
       this.s.dinos = this.s.dinos.filter((d) => d.enc !== b.id);
+      this.playerTask(b.x + b.w / 2, b.y + b.h / 2, 'demolish', null);
       delete this.s.buildings[id];
       this._rebuildOcc();
       this._earn(refund, null);
@@ -456,6 +513,7 @@ window.DZ = window.DZ || {};
     moveBuilding(id, nx, ny) {
       const b = this.s.buildings[id];
       if (!b || b.fixed) return { ok: false, reason: 'Ce bâtiment ne peut pas être déplacé' };
+      if (this.busy(b)) return { ok: false, reason: 'Impossible de déplacer un chantier en cours' };
       const c = this.canPlace(b.type, nx, ny, b.id, true);
       if (!c.ok) return c;
       const old = { x0: b.x - 1, y0: b.y - 1, x1: b.x + b.w, y1: b.y + b.h };
@@ -468,6 +526,7 @@ window.DZ = window.DZ || {};
       this._netChanged(old);
       this.emit('mapChanged', { x0: nx - 1, y0: ny - 1, x1: nx + b.w, y1: ny + b.h });
       this.emit('moved', b);
+      this.playerTask(nx + b.w / 2, ny + b.h / 2, 'build', b.id);
       return { ok: true };
     }
 
@@ -540,6 +599,7 @@ window.DZ = window.DZ || {};
 
     isConnected(b) {
       if (b.type === 'entree') return true;
+      if (b.cons) return false;
       if (b._conV === this.netVersion) return b._con;
       const f = this.field('exit');
       b._con = this.accessTiles(b).some((i) => f[i] >= 0);
@@ -587,9 +647,12 @@ window.DZ = window.DZ || {};
     }
     usedSpace(b) {
       let s = 0;
-      for (const d of this.s.dinos) if (d.enc === b.id) s += C.dinos[d.sp].space;
+      for (const d of this.s.dinos) if (d.enc === b.id) s += this.dinoSpace(d);
+      for (const dl of this.s.deliveries) if (dl.enc === b.id && !dl.dropped && !dl.cancelled) s += C.dinos[dl.sp].space;
       return s;
     }
+    dinoSpace(d) { const sp = C.dinos[d.sp].space; return d.young ? Math.max(1, Math.ceil(sp * C.breeding.babySpace)) : sp; }
+    deliveriesTo(b) { return this.s.deliveries.filter((dl) => dl.enc === b.id && !dl.dropped && !dl.cancelled); }
     dinosIn(b) { return this.s.dinos.filter((d) => d.enc === b.id); }
 
     habitatOk(spId, b) {
@@ -604,6 +667,7 @@ window.DZ = window.DZ || {};
       const sp = DZ.SPECIES[spId], bal = C.dinos[spId];
       if (!this.s.unlocked[spId]) return { ok: false, reason: 'Espèce verrouillée' };
       if (!b || !this.isEnclosure(b)) return { ok: false, reason: 'Choisissez un enclos' };
+      if (b.cons) return { ok: false, reason: 'Enclos encore en construction' };
       if (!this.habitatOk(spId, b)) {
         const def = C.buildings[b.type];
         if (sp.habitat === 'air') return { ok: false, reason: 'Il faut une volière' };
@@ -618,6 +682,7 @@ window.DZ = window.DZ || {};
 
     wouldConflict(spId, b) {
       const species = new Set(this.dinosIn(b).map((d) => d.sp));
+      for (const dl of this.deliveriesTo(b)) species.add(dl.sp);
       species.add(spId);
       return this._conflictIn(species);
     }
@@ -632,24 +697,163 @@ window.DZ = window.DZ || {};
 
     conflictOf(b) { return this._conflictIn(new Set(this.dinosIn(b).map((d) => d.sp))); }
 
-    buyDino(spId, bid) {
+    /* Achat : le dinosaure est préparé puis livré par hélicoptère. */
+    buyDino(spId, bid, sex) {
       const b = this.s.buildings[bid];
       const c = this.canAddDino(spId, b);
       if (!c.ok) return c;
       const bal = C.dinos[spId];
       this._spend(bal.price, 'dinos');
-      const p = this.randomPointIn(b, spId);
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      const west = this.layout && this.layout.seaSide === 'W';
+      const dl = {
+        id: this.s.nextDel++, sp: spId, enc: b.id, sex: sex === 'M' || sex === 'F' ? sex : (R() < 0.5 ? 'M' : 'F'), name: '',
+        t: 0, prep: this.deliveryHours(spId), x: cx, y: cy,
+        sx: west ? -45 : W + 45, sy: U.clamp(cy - 30 + R() * 20, -20, H + 20)
+      };
+      dl.name = DZ.dinoName(dl.sex, this.s.nameIdx++);
+      // plusieurs commandes pour le même enclos : les hélicoptères se suivent
+      const queued = this.s.deliveries.filter((x) => x.enc === b.id && !x.dropped && !x.cancelled).length;
+      dl.prep += queued * (C.delivery.hover + 0.12);
+      this.s.deliveries.push(dl);
+      this.emit('deliveryOrdered', dl);
+      this.playerTask(cx, cy, 'receive', b.id);
+      if (c.warning) this.notify('⚠️', `Attention : le ${DZ.SPECIES[c.warning.predator].name} risque d'attaquer le ${DZ.SPECIES[c.warning.prey].name} !`, 'bad');
+      return { ok: true, delivery: dl };
+    }
+
+    deliveryHours(spId) { const D = C.delivery; return D.prepBase + D.prepLog * Math.log10(Math.max(1, C.dinos[spId].price / 500)); }
+    deliveryTotal(dl) { const D = C.delivery; return dl.prep + D.flight + D.hover; }
+    deliveryPhase(dl) {
+      const D = C.delivery;
+      let t = dl.t - dl.prep;
+      if (t < 0) return { phase: 'prep', u: dl.t / dl.prep, left: -t + D.flight + D.hover };
+      if (t < D.flight) return { phase: 'fly', u: t / D.flight, left: D.flight - t + D.hover };
+      t -= D.flight;
+      if (t < D.hover) return { phase: 'hover', u: t / D.hover, left: D.hover - t };
+      t -= D.hover;
+      if (t < D.leave) return { phase: 'leave', u: t / D.leave, left: 0 };
+      return { phase: 'done', u: 1, left: 0 };
+    }
+    /* Position de l'hélicoptère (repère des cases ; alt : 0 sol → 1 haute altitude). */
+    deliveryPose(dl) {
+      const ph = this.deliveryPhase(dl);
+      if (ph.phase === 'prep' || ph.phase === 'done') return null;
+      const ease = (u) => u * u * (3 - 2 * u);
+      const tx = dl.x, ty = dl.y, HOV = 0.42;
+      const head = Math.atan2(ty - dl.sy, tx - dl.sx);
+      if (ph.phase === 'fly') {
+        const e = ease(ph.u);
+        return { x: U.lerp(dl.sx, tx, e), y: U.lerp(dl.sy, ty, e), alt: U.lerp(1, HOV, e), heading: head, tilt: Math.sin(ph.u * Math.PI) * 0.22, cable: 0, crate: true, phase: ph.phase, u: ph.u };
+      }
+      if (ph.phase === 'hover') {
+        const w = Math.sin(dl.t * 40) * 0.05;
+        return { x: tx + w, y: ty + Math.cos(dl.t * 31) * 0.05, alt: HOV + Math.sin(dl.t * 25) * 0.01, heading: head, tilt: -0.04, cable: ease(Math.min(1, ph.u * 1.25)), crate: true, phase: ph.phase, u: ph.u };
+      }
+      const e = ease(ph.u);
+      return { x: U.lerp(tx, dl.sx, e * e), y: U.lerp(ty, dl.sy, e * e), alt: U.lerp(HOV, 1.15, e), heading: head + Math.PI * Math.min(1, ph.u * 2.5), tilt: Math.sin(ph.u * Math.PI) * 0.18, cable: Math.max(0, 1 - ph.u * 4), crate: false, phase: ph.phase, u: ph.u };
+    }
+
+    _updateDeliveries(dh) {
+      const list = this.s.deliveries;
+      for (let i = list.length - 1; i >= 0; i--) {
+        const dl = list[i];
+        const before = this.deliveryPhase(dl).phase;
+        dl.t += dh;
+        const ph = this.deliveryPhase(dl).phase;
+        const b = this.s.buildings[dl.enc];
+        if (b) { dl.x = b.x + b.w / 2; dl.y = b.y + b.h / 2; }
+        if (before === 'prep' && ph !== 'prep') this.emit('heliDepart', dl);
+        if (!dl.dropped && (ph === 'leave' || ph === 'done')) { dl.dropped = true; this._dropDino(dl); }
+        if (ph === 'done') list.splice(i, 1);
+      }
+    }
+
+    _dropDino(dl) {
+      const b = this.s.buildings[dl.enc];
+      if (dl.cancelled || !b) return;
+      const p = this.randomPointIn(b, dl.sp);
       const d = {
-        id: this.s.nextDinoId++, sp: spId, enc: b.id,
-        name: DZ.DINO_NAMES[this.s.nameIdx++ % DZ.DINO_NAMES.length],
+        id: this.s.nextDinoId++, sp: dl.sp, enc: b.id, name: dl.name, sex: dl.sex,
         x: p.x, y: p.y, face: R() < 0.5 ? 1 : -1, upHab: 0, upCare: 0, sick: false, sickDays: 0, happiness: 70, born: this.s.day
       };
+      // il sort de la caisse posée au centre de l'enclos
+      const sh = DZ.encShape(b);
+      if (DZ.encSDF(b, sh.cx, sh.cy, sh) < -this.shapeMargin(b, DZ.SPECIES[dl.sp])) { d.x = sh.cx; d.y = sh.cy; }
       this._initDinoTransient(d);
       this.s.dinos.push(d);
       this._updateHappiness();
       this.emit('dinoAdded', d);
-      if (c.warning) this.notify('⚠️', `Attention : le ${DZ.SPECIES[c.warning.predator].name} risque d'attaquer le ${DZ.SPECIES[c.warning.prey].name} !`, 'bad');
-      return { ok: true, dino: d };
+      this.emit('delivered', { dino: d, delivery: dl });
+      this.notify('🚁', `Livraison réussie : ${d.name}, ${DZ.SPECIES[d.sp].name} ${d.sex === 'F' ? 'femelle' : 'mâle'}, découvre son enclos.`, 'good', { type: 'select', building: b.id });
+    }
+
+    /* ---------- Reproduction ---------- */
+    dinoScale(d) {
+      if (!d.young) return 1;
+      const B = C.breeding, size = DZ.SPECIES[d.sp].size || 'M';
+      const g = U.clamp((this.s.day - d.born + (this.s.hour - C.time.startHour) / (C.time.endHour - C.time.startHour)) / B.growDays[size], 0, 1);
+      return B.babyScale + (1 - B.babyScale) * g;
+    }
+    /* État de la reproduction d'une espèce dans un enclos (pour l'interface). */
+    breedingInfo(b, sp) {
+      const B = C.breeding, adults = this.dinosIn(b).filter((d) => d.sp === sp && !d.young);
+      const m = adults.filter((d) => d.sex === 'M').length, f = adults.filter((d) => d.sex === 'F').length;
+      const need = B.days[DZ.SPECIES[sp].size || 'M'];
+      const pending = this.s.births.some((x) => x.enc === b.id && x.sp === sp);
+      const hap = adults.length ? adults.reduce((a, d) => a + d.happiness, 0) / adults.length : 0;
+      return { m, f, pair: m > 0 && f > 0, days: (b.breed && b.breed[sp]) || 0, need, pending, happyOk: hap >= B.minHappiness };
+    }
+    _breed() {
+      const B = C.breeding, s = this.s;
+      for (const id in s.buildings) {
+        const b = s.buildings[id];
+        if (!this.isEnclosure(b) || b.cons) continue;
+        const bySp = {};
+        for (const d of this.dinosIn(b)) if (!d.young) (bySp[d.sp] = bySp[d.sp] || []).push(d);
+        b.breed = b.breed || {};
+        for (const sp in b.breed) if (!bySp[sp]) delete b.breed[sp];
+        for (const sp in bySp) {
+          const list = bySp[sp];
+          const m = list.filter((d) => d.sex === 'M' && !d.sick), f = list.filter((d) => d.sex === 'F' && !d.sick);
+          if (!m.length || !f.length) { delete b.breed[sp]; continue; }
+          const hap = list.reduce((a, d) => a + d.happiness, 0) / list.length;
+          if (hap < B.minHappiness) continue; // en pause tant qu'ils ne sont pas heureux
+          b.breed[sp] = (b.breed[sp] || 0) + 1;
+          if (b.breed[sp] >= B.days[DZ.SPECIES[sp].size || 'M']) {
+            b.breed[sp] = 0;
+            s.births.push({ enc: b.id, sp, hour: rr(9, 16) });
+          }
+        }
+      }
+    }
+    _checkBirths(prevHour) {
+      const s = this.s;
+      for (let i = s.births.length - 1; i >= 0; i--) {
+        const br = s.births[i];
+        if (!(prevHour < br.hour && s.hour >= br.hour)) continue;
+        s.births.splice(i, 1);
+        const b = s.buildings[br.enc];
+        if (!b) continue;
+        const sp = DZ.SPECIES[br.sp];
+        const mother = this.dinosIn(b).find((d) => d.sp === br.sp && d.sex === 'F' && !d.young);
+        if (!mother) continue;
+        if (this.usedSpace(b) + C.dinos[br.sp].space > this.capacity(b)) {
+          this.notify('💞', `Le couple de ${sp.name} voudrait agrandir la famille, mais l'enclos est plein. Améliorez-le ou faites de la place.`, 'info', { type: 'select', building: b.id });
+          continue;
+        }
+        const d = {
+          id: s.nextDinoId++, sp: br.sp, enc: b.id, name: '', sex: R() < 0.5 ? 'M' : 'F', young: 1,
+          x: mother.x + rr(-0.3, 0.3), y: mother.y + rr(-0.3, 0.3), face: mother.face, upHab: 0, upCare: 0, sick: false, sickDays: 0, happiness: 85, born: s.day
+        };
+        d.name = DZ.dinoName(d.sex, s.nameIdx++);
+        this.keepInside(d, b, sp);
+        this._initDinoTransient(d);
+        s.dinos.push(d);
+        this._updateHappiness();
+        this.emit('dinoBorn', d);
+        this.notify('🐣', `Naissance ! ${d.name}, ${d.sex === 'F' ? 'une petite' : 'un petit'} ${sp.name}, vient de naître.`, 'good', { type: 'select', building: b.id });
+      }
     }
 
     _initDinoTransient(d) {
@@ -659,13 +863,14 @@ window.DZ = window.DZ || {};
 
     _dinoValue(d) {
       const bal = C.dinos[d.sp], up = C.economy.dinoUpgrades;
-      return bal.price * (1 + (d.upHab ? up.habitat.costRate : 0) + (d.upCare ? up.care.costRate : 0));
+      return bal.price * (d.young ? C.breeding.babyValue : 1) * (1 + (d.upHab ? up.habitat.costRate : 0) + (d.upCare ? up.care.costRate : 0));
     }
 
     sellDino(id) {
       const d = this.s.dinos.find((x) => x.id === id);
       if (!d) return { ok: false };
       const refund = Math.round(this._dinoValue(d) * C.economy.dinoSellRate);
+      this.playerTask(d.x, d.y, 'care', d.enc);
       this.s.dinos = this.s.dinos.filter((x) => x !== d);
       this._earn(refund, null);
       this._updateHappiness();
@@ -686,6 +891,7 @@ window.DZ = window.DZ || {};
       if (this.s.money < cost) return { ok: false, reason: 'Fonds insuffisants' };
       this._spend(cost, 'dinos');
       d[field] = 1;
+      this.playerTask(d.x, d.y, 'care', d.enc);
       this._updateHappiness();
       this.emit('dinoUpgraded', d);
       return { ok: true };
@@ -700,9 +906,10 @@ window.DZ = window.DZ || {};
       if (this.s.money < cost) return { ok: false, reason: 'Fonds insuffisants' };
       this._spend(cost, 'dinos');
       d.sick = false; d.sickDays = 0;
+      this.playerTask(d.x, d.y, 'treat', d.enc);
       this._updateHappiness();
       this.emit('dinoTreated', d);
-      this.notify('💉', `${d.name} le ${DZ.SPECIES[d.sp].name} est guéri !`, 'good');
+      this.notify('💉', `${this.who(d)} est ${d.sex === 'F' ? 'guérie' : 'guéri'} !`, 'good');
       return { ok: true };
     }
 
@@ -724,7 +931,7 @@ window.DZ = window.DZ || {};
 
     dinoAttraction(d) {
       const up = C.economy.dinoUpgrades;
-      let a = C.dinos[d.sp].attraction;
+      let a = C.dinos[d.sp].attraction * (d.young ? C.breeding.babyAttraction : 1);
       a *= 1 + (d.upHab ? up.habitat.attraction : 0) + (d.upCare ? up.care.attraction : 0);
       a *= 0.6 + d.happiness / 250;
       if (d.sick) a *= 0.3;
@@ -963,6 +1170,10 @@ window.DZ = window.DZ || {};
       this._spawn(dh);
       this.updateVisitors(dt, dh);
       this.updateDinos(dt);
+      this._updateWorks(dh);
+      this._updateDeliveries(dh);
+      if (s.births.length) this._checkBirths(prevHour);
+      this._updatePlayer(dt);
       if (Math.floor(prevHour) !== Math.floor(s.hour)) {
         // la fréquentation suit les nouveautés du parc pendant la journée
         if (s.hour < C.time.lastEntryHour) this.dailyTarget = this.computeDailyTarget();
@@ -1031,7 +1242,7 @@ window.DZ = window.DZ || {};
     _makeSick(d) {
       d.sick = true; d.sickDays = 0;
       this._updateHappiness();
-      this.notify('🤒', `${d.name} le ${DZ.SPECIES[d.sp].name} est malade ! Soignez-le (${U.money(this.treatCost(d))}) avant ${C.events.sickDaysToDeath} jours.`, 'bad', { type: 'treat', dino: d.id });
+      this.notify('🤒', `${this.who(d)} est malade ! Soignez-${d.sex === 'F' ? 'la' : 'le'} (${U.money(this.treatCost(d))}) avant ${C.events.sickDaysToDeath} jours.`, 'bad', { type: 'treat', dino: d.id });
     }
 
     _triggerEscape() {
@@ -1046,7 +1257,7 @@ window.DZ = window.DZ || {};
       s.rating = U.clamp(s.rating - C.events.escapeRatingPenalty, 0, 5);
       for (const g of this.visitors) { g.panic = true; g.sat -= 20; g.mood = 'peur'; g.bubbleT = 0; if (g.state !== 'exit') { g.hidden = false; this.goExit(g); } }
       this.emit('escape', { dino: d, building: b });
-      this.notify('🚨', `Alerte ! ${d.name} le ${DZ.SPECIES[d.sp].name} a enfoncé la palissade ! Les visiteurs fuient. Réparation : ${U.money(cost)}. Améliorez la clôture !`, 'bad', { type: 'select', building: b.id });
+      this.notify('🚨', `Alerte ! ${this.who(d)} a enfoncé la palissade ! Les visiteurs fuient. Réparation : ${U.money(cost)}. Améliorez la clôture !`, 'bad', { type: 'select', building: b.id });
     }
 
     endDay() {
@@ -1056,7 +1267,7 @@ window.DZ = window.DZ || {};
       this.visitors = [];
       // entretien
       let dinoUp = 0, bUp = 0;
-      for (const d of s.dinos) dinoUp += C.dinos[d.sp].upkeep;
+      for (const d of s.dinos) dinoUp += C.dinos[d.sp].upkeep * (d.young ? C.breeding.babyUpkeep : 1);
       for (const id in s.buildings) {
         const b = s.buildings[id], def = C.buildings[b.type];
         if (def.upkeep) bUp += def.upkeep[b.level - 1];
@@ -1077,7 +1288,7 @@ window.DZ = window.DZ || {};
       for (const d of dead) {
         s.dinos = s.dinos.filter((x) => x !== d);
         s.rating = U.clamp(s.rating - E.deathRatingPenalty, 0, 5);
-        this.notify('🕯️', `${d.name} le ${DZ.SPECIES[d.sp].name} n'a pas survécu à sa maladie.`, 'bad');
+        this.notify('🕯️', `${this.who(d)} n'a pas survécu à sa maladie.`, 'bad');
         this.emit('dinoRemoved', d);
       }
       // conflits entre prédateurs et proies
@@ -1090,12 +1301,18 @@ window.DZ = window.DZ || {};
           if (victim) {
             s.dinos = s.dinos.filter((x) => x !== victim);
             s.rating = U.clamp(s.rating - E.conflictRatingPenalty, 0, 5);
-            this.notify('⚠️', `Drame dans l'enclos : le ${DZ.SPECIES[c.predator].name} a attaqué ${victim.name} le ${DZ.SPECIES[c.prey].name}. Séparez carnivores et herbivores !`, 'bad', { type: 'select', building: b.id });
+            this.notify('⚠️', `Drame dans l'enclos : le ${DZ.SPECIES[c.predator].name} a attaqué ${this.who(victim)}. Séparez carnivores et herbivores !`, 'bad', { type: 'select', building: b.id });
             this.emit('dinoRemoved', victim);
           }
         }
       }
       this._updateHappiness();
+      // reproduction et croissance des petits
+      this._breed();
+      for (const d of s.dinos) if (d.young && s.day + 1 - d.born >= C.breeding.growDays[DZ.SPECIES[d.sp].size || 'M']) {
+        d.young = 0;
+        this.notify('🦖', `${this.who(d)} est ${d.sex === 'F' ? 'devenue' : 'devenu'} adulte !`, 'info');
+      }
       // note du parc
       const oldRating = s.rating;
       const score = this.dayScore();
@@ -1161,6 +1378,150 @@ window.DZ = window.DZ || {};
         }
       }
     }
+
+    /* ------------------------------------------------------------------
+       Directeur ou directrice du parc : l'avatar se rend sur les lieux de
+       chaque action (chantier, soins, livraison…). Purement visuel : les
+       actions prennent effet tout de suite.
+       ------------------------------------------------------------------ */
+    _initPlayer() {
+      const p = this.s.player;
+      const x = p.x !== undefined ? p.x : ENT.tileX + 0.5, y = p.y !== undefined ? p.y : ENT.tileY - 2.5;
+      this.pl = { x, y, tasks: [], cur: null, path: null, pi: 0, state: 'idle', t: 0, idleT: 4, dirX: 0, dirY: -1, phase: 0, speed: 0, anim: 0 };
+    }
+    playerTask(x, y, act, bid) {
+      const p = this.pl;
+      if (!p) return;
+      const last = p.tasks.length ? p.tasks[p.tasks.length - 1] : p.cur;
+      if (last && bid != null && last.bid === bid && last.act === act) return;
+      p.tasks.push({ x, y, act, bid });
+      if (p.tasks.length > 6) p.tasks.shift();
+      if (p.state === 'idle' || (p.state === 'work' && p.cur && p.cur.act !== 'build')) { p.state = 'idle'; p.cur = null; }
+    }
+    _walkable(i, startOcc) {
+      const t = this.terrain[i];
+      if (t === TER.WATER || t === TER.ROCK) return false;
+      const o = this.occ[i];
+      return !o || o === startOcc;
+    }
+    /* Plus court chemin sur les cases praticables (8 directions), puis lissage. */
+    _findPath(x0, y0, task) {
+      const sx = U.clamp(Math.floor(x0), 0, W - 1), sy = U.clamp(Math.floor(y0), 0, H - 1), start = idx(sx, sy);
+      const b = task.bid != null ? this.s.buildings[task.bid] : null;
+      const startOcc = this.occ[start];
+      const gx = Math.floor(task.x), gy = Math.floor(task.y);
+      const isGoal = b
+        ? (x, y) => x >= b.x - 1 && x <= b.x + b.w && y >= b.y - 1 && y <= b.y + b.h && !(x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h)
+        : (x, y) => Math.abs(x - gx) <= 1 && Math.abs(y - gy) <= 1;
+      const prev = this._bfsPrev || (this._bfsPrev = new Int32Array(W * H));
+      const q = this._bfsQ || (this._bfsQ = new Int32Array(W * H));
+      prev.fill(-1);
+      prev[start] = start;
+      let qh = 0, qt = 0, goal = -1;
+      q[qt++] = start;
+      const N8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+      while (qh < qt) {
+        const i = q[qh++], x = i % W, y = (i / W) | 0;
+        if (isGoal(x, y) && (i !== start || !b || !(x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h))) { goal = i; break; }
+        for (const [dx, dy] of N8) {
+          const nx = x + dx, ny = y + dy;
+          if (!inMap(nx, ny)) continue;
+          const j = idx(nx, ny);
+          if (prev[j] >= 0 || !this._walkable(j, startOcc)) continue;
+          if (dx && dy && (!this._walkable(idx(x + dx, y), startOcc) || !this._walkable(idx(x, y + dy), startOcc))) continue;
+          prev[j] = i; q[qt++] = j;
+        }
+      }
+      let pts;
+      if (goal < 0) {
+        // inaccessible à pied (île, bâtiment enclavé) : ligne droite
+        pts = [[b ? U.clamp(task.x, b.x - 0.4, b.x + b.w + 0.4) : task.x, b ? U.clamp(task.y, b.y - 0.4, b.y + b.h + 0.4) : task.y]];
+      } else {
+        const tiles = [];
+        for (let i = goal; i !== start; i = prev[i]) tiles.push(i);
+        tiles.reverse();
+        const raw = tiles.map((i) => [(i % W) + 0.5, ((i / W) | 0) + 0.5]);
+        // dernier pas : se placer contre le bâtiment, face au point visé
+        if (b && raw.length) { const e = raw[raw.length - 1]; e[0] = U.lerp(e[0], U.clamp(e[0], b.x, b.x + b.w), 0.45); e[1] = U.lerp(e[1], U.clamp(e[1], b.y, b.y + b.h), 0.45); }
+        const sight = (a, c) => {
+          const n = Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / 0.3);
+          for (let k = 1; k < n; k++) { const x = a[0] + (c[0] - a[0]) * k / n, y = a[1] + (c[1] - a[1]) * k / n; if (!this._walkable(idx(Math.floor(x), Math.floor(y)), startOcc)) return false; }
+          return true;
+        };
+        pts = [];
+        let cur = [x0, y0], i = 0;
+        while (i < raw.length) {
+          let j = raw.length - 1;
+          while (j > i && !sight(cur, raw[j])) j--;
+          pts.push(raw[j]); cur = raw[j]; i = j + 1;
+        }
+      }
+      return pts;
+    }
+    _playerStart(task) {
+      const p = this.pl, P = C.player;
+      p.cur = task;
+      p.path = this._findPath(p.x, p.y, task);
+      p.pi = 0;
+      let L = 0, px = p.x, py = p.y;
+      for (const [x, y] of p.path) { L += Math.hypot(x - px, y - py); px = x; py = y; }
+      p.speed = Math.max(P.walkSpeed, L / P.maxTripSeconds);
+      p.state = 'walk';
+      if (L < 0.05) this._playerArrive();
+    }
+    _playerArrive() {
+      const p = this.pl, task = p.cur;
+      p.state = 'work'; p.anim = 0;
+      p.t = task.act === 'build' ? C.player.workSeconds : task.act === 'receive' ? 4 : task.act === 'treat' ? 3.5 : 2.5;
+      const b = task.bid != null ? this.s.buildings[task.bid] : null;
+      let tx = task.x, ty = task.y;
+      if (b && task.act === 'build') { tx = U.clamp(p.x, b.x + 0.5, b.x + b.w - 0.5); ty = U.clamp(p.y, b.y + 0.5, b.y + b.h - 0.5); }
+      if (task.act === 'receive' && b) { tx = b.x + b.w / 2; ty = b.y + b.h / 2; }
+      const dx = tx - p.x, dy = ty - p.y, l = Math.hypot(dx, dy);
+      if (l > 0.01) { p.dirX = dx / l; p.dirY = dy / l; }
+    }
+    _updatePlayer(dt) {
+      const p = this.pl;
+      if (!p) return;
+      if (p.state === 'walk') {
+        let move = p.speed * dt;
+        p.phase += move * 3.4;
+        while (move > 1e-6 && p.pi < p.path.length) {
+          const [tx, ty] = p.path[p.pi];
+          const dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
+          if (d > 1e-4) { p.dirX = dx / d; p.dirY = dy / d; }
+          if (d <= move) { p.x = tx; p.y = ty; p.pi++; move -= d; }
+          else { p.x += dx / d * move; p.y += dy / d * move; move = 0; }
+        }
+        if (p.pi >= p.path.length) this._playerArrive();
+        return;
+      }
+      if (p.state === 'work') {
+        p.t -= dt; p.anim += dt;
+        const b = p.cur && p.cur.bid != null ? this.s.buildings[p.cur.bid] : null;
+        const stillWorks = p.cur && p.cur.act === 'build' && b && this.busy(b);
+        if (p.t <= 0 && (!stillWorks || p.tasks.length)) { p.cur = null; p.state = 'idle'; p.idleT = rr(6, 12); }
+        return;
+      }
+      if (p.tasks.length) { this._playerStart(p.tasks.shift()); return; }
+      p.anim += dt;
+      p.idleT -= dt;
+      if (p.idleT <= 0) {
+        p.idleT = rr(8, 16);
+        // va superviser le chantier en cours le plus proche
+        let best = null, bd = 1e9;
+        for (const id in this.s.buildings) {
+          const b = this.s.buildings[id];
+          if (!this.busy(b) || C.buildings[b.type].cat === 'deco') continue;
+          const d = Math.hypot(b.x + b.w / 2 - p.x, b.y + b.h / 2 - p.y);
+          if (d < bd) { bd = d; best = b; }
+        }
+        if (best && bd > 2) this._playerStart({ x: best.x + best.w / 2, y: best.y + best.h / 2, act: 'build', bid: best.id });
+      }
+    }
+
+    /* « Luna (Triceratops) » : évite d'accorder l'article avec le sexe. */
+    who(d) { return `${d.name} (${DZ.SPECIES[d.sp].name})`; }
 
     notify(icon, text, kind, action) { this.emit('notify', { icon, text, kind: kind || 'info', action }); }
 
@@ -1365,7 +1726,7 @@ window.DZ = window.DZ || {};
         let best = null, bd = 1e9;
         for (const id in s.buildings) {
           const b = s.buildings[id];
-          if (b.type !== type) continue;
+          if (b.type !== type || b.cons) continue;
           const f = this.field(b.id);
           const d = f[here];
           if (d >= 0 && d < bd) { bd = d; best = b; }

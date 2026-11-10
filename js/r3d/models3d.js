@@ -572,4 +572,149 @@
     leg.material('plain').col('#2a2420').push().t(0, -0.155, 0.012).box(0.035, 0.02, 0.06).pop();
     return { body: body.finish(), leg: leg.finish() };
   };
+
+  /* ------------------------------------------------------------------
+     Avatar du directeur ou de la directrice (regarde vers +z, ~0,4 de haut)
+     ------------------------------------------------------------------ */
+  G.avatarMeshes = function (i, gender) {
+    const A = DZ.AVATARS[i] || DZ.AVATARS[0];
+    const f = gender === 'f', a = gender === 'a';
+    const sh = f ? 0.046 : 0.054;
+    const body = new MB();
+    // torse et blouse
+    body.material('cloth').col(A.top);
+    body.push().t(0, 0.15, 0).loft([{ p: [0, 0, 0], ry: f ? 0.047 : 0.044, rz: 0.031 }, { p: [0, 0.07, 0], ry: f ? 0.043 : 0.05, rz: 0.034 }, { p: [0, 0.13, 0], ry: sh, rz: 0.033 }, { p: [0, 0.148, 0], ry: 0.02, rz: 0.02 }], 10).pop();
+    if (A.coat) body.push().t(0, 0.07, 0).loft([{ p: [0, 0, 0], ry: 0.058, rz: 0.042 }, { p: [0, 0.085, 0], ry: 0.049, rz: 0.035 }], 10).pop();
+    if (f && !A.coat) { body.col(A.bottom).push().t(0, 0.105, 0).loft([{ p: [0, 0, 0], ry: 0.05, rz: 0.038 }, { p: [0, 0.05, 0], ry: 0.046, rz: 0.032 }], 10).pop(); }
+    body.material('cloth').col('#2a2018').push().t(0, 0.148, 0).cyl(0.046, 0.046, 0.012, 10).pop();
+    // bras gauche (le droit est animé séparément)
+    body.col(A.top).push().t(-(sh + 0.006), 0.272, 0).rz(-0.14).t(0, -0.115, 0).cyl(0.014, 0.017, 0.115, 6).pop();
+    body.material('plain').col(A.skin);
+    body.push().t(-(sh + 0.022), 0.152, 0).sphere(0.016, 0.016, 0.016, 6, 4).pop();
+    // cou, tête
+    body.push().t(0, 0.288, 0).cyl(0.016, 0.016, 0.03, 6).pop();
+    body.push().t(0, 0.338, 0).sphere(0.043, 0.048, 0.043, 10, 7).pop();
+    body.push().t(0, 0.332, 0.041).sphere(0.008, 0.009, 0.008, 5, 3).pop();
+    body.col('#1a120c');
+    for (const sx of [-1, 1]) body.push().t(sx * 0.016, 0.344, 0.039).sphere(0.006, 0.006, 0.004, 4, 3).pop();
+    // cheveux
+    body.col(A.hair);
+    body.push().t(0, 0.353, -0.006).sphere(0.046, 0.037, 0.046, 10, 6).pop();
+    if (f) { body.push().t(0, 0.322, -0.03).sphere(0.045, 0.052, 0.03, 8, 5).pop(); body.push().t(0, 0.31, -0.055).rx(0.35).sphere(0.02, 0.045, 0.019, 7, 5).pop(); }
+    else if (a) body.push().t(0, 0.33, -0.012).sphere(0.05, 0.036, 0.047, 9, 5).pop();
+    // chapeau
+    if (A.hat === 'ranger' || A.hat === 'fedora') {
+      body.material('cloth').col(A.hatCol);
+      body.push().t(0, 0.37, -0.004).cyl(A.hat === 'ranger' ? 0.088 : 0.072, A.hat === 'ranger' ? 0.086 : 0.07, 0.006, 16, 'both').pop();
+      body.push().t(0, 0.374, -0.004).cyl(0.046, 0.04, A.hat === 'ranger' ? 0.042 : 0.036, 12).pop();
+      body.col('#2a1c12').push().t(0, 0.376, -0.004).cyl(0.047, 0.046, 0.01, 12, false).pop();
+    } else if (A.hat === 'cap') {
+      body.material('cloth').col(A.hatCol);
+      body.push().t(0, 0.362, -0.004).sphere(0.048, 0.03, 0.048, 10, 5).pop();
+      body.push().t(0, 0.364, 0.05).box(0.06, 0.005, 0.05).pop();
+    } else if (A.hat === 'aviator') {
+      body.material('cloth').col(A.hatCol);
+      body.push().t(0, 0.35, -0.004).sphere(0.05, 0.045, 0.05, 10, 6).pop();
+      for (const sx of [-1, 1]) body.push().t(sx * 0.045, 0.318, 0).box(0.01, 0.04, 0.03).pop();
+      body.material('glass').col('#9fc1cf');
+      for (const sx of [-1, 1]) body.push().t(sx * 0.017, 0.366, 0.038).rx(1.2).cyl(0.012, 0.012, 0.01, 8, 'both').pop();
+    }
+    // accessoires
+    body.material('plain');
+    if (A.acc === 'radio') body.col('#2b2b2b').push().t(0.028, 0.23, 0.033).box(0.016, 0.03, 0.01).pop();
+    if (A.acc === 'bag') { body.col('#6b4a2c').push().t(-0.05, 0.15, 0.01).box(0.03, 0.04, 0.05).pop(); body.push().t(0, 0.215, 0).rz(0.75).box(0.012, 0.15, 0.072).pop(); }
+    if (A.acc === 'stetho') { body.col('#30353a'); body.tube([[-0.022, 0.29, 0.02], [-0.03, 0.255, 0.033], [0, 0.235, 0.036], [0.03, 0.255, 0.033], [0.022, 0.29, 0.02]], 0.004, 0.004, 5); }
+    if (A.acc === 'bandana') body.col('#c8a14a').push().t(0, 0.287, 0.012).rx(-0.3).cone(0.026, 0.035, 6).pop();
+    if (A.acc === 'glasses') { body.col('#1f1f1f'); for (const sx of [-1, 1]) body.push().t(sx * 0.016, 0.344, 0.042).rx(Math.PI / 2).cyl(0.011, 0.011, 0.003, 10, false).pop(); }
+    const leg = new MB();
+    leg.material('cloth').col(A.bottom).push().t(0, -0.15, 0).cyl(0.021, 0.025, 0.15, 6).pop();
+    leg.material('plain').col('#3a2a1e').push().t(0, -0.153, 0.012).box(0.038, 0.026, 0.068).pop();
+    const arm = new MB();
+    arm.material('cloth').col(A.top).push().t(0, -0.115, 0).cyl(0.014, 0.017, 0.115, 6).pop();
+    arm.material('plain').col(A.skin).push().t(0, -0.124, 0).sphere(0.016, 0.016, 0.016, 6, 4).pop();
+    // outils tenus dans la main droite (repère du bras : la main est en y = -0,124)
+    const hammer = new MB();
+    hammer.material('wood').col('#8a6238').push().t(0, -0.124, 0).rx(Math.PI / 2).t(0, -0.01, 0).cyl(0.006, 0.006, 0.1, 5).pop();
+    hammer.material('metal').col('#7d8186').push().t(0, -0.124, 0.085).box(0.05, 0.022, 0.022).pop();
+    const kit = new MB();
+    kit.material('plain').col('#f2f2ee').push().t(0, -0.17, 0.01).box(0.06, 0.045, 0.03).pop();
+    kit.col('#c8372d').push().t(0, -0.15, 0.026).box(0.022, 0.008, 0.002).pop().push().t(0, -0.159, 0.026).box(0.008, 0.026, 0.002).pop();
+    const board = new MB();
+    board.material('wood').col('#9a7348').push().t(0, -0.13, 0.03).rx(-1.0).box(0.06, 0.004, 0.08).pop();
+    board.material('plain').col('#f4f1e6').push().t(0, -0.127, 0.031).rx(-1.0).box(0.05, 0.002, 0.065).pop();
+    return { body: body.finish(), leg: leg.finish(), arm: arm.finish(), hammer: hammer.finish(), kit: kit.finish(), board: board.finish(), sh };
+  };
+
+  /* ------------------------------------------------------------------
+     Hélicoptère de livraison (avant vers +x) et caisse
+     ------------------------------------------------------------------ */
+  G.heliMeshes = function () {
+    const body = new MB();
+    const white = '#e9e6dd', red = '#b8432d', dark = '#26282b';
+    body.material('metal').col(white);
+    body.loft([{ p: [-0.55, 0.32, 0], ry: 0.14, rz: 0.14 }, { p: [-0.25, 0.3, 0], ry: 0.28, rz: 0.26 }, { p: [0.15, 0.3, 0], ry: 0.3, rz: 0.27 }, { p: [0.42, 0.26, 0], ry: 0.24, rz: 0.22 }, { p: [0.58, 0.22, 0], ry: 0.1, rz: 0.1 }], 14);
+    body.col(red).loft([{ p: [-0.3, 0.2, 0], ry: 0.282, rz: 0.262 }, { p: [0.3, 0.2, 0], ry: 0.272, rz: 0.252 }], 14, { caps: false });
+    // poutre de queue, dérive et stabilisateur
+    body.col(white).push().t(-0.5, 0.36, 0).rz(Math.PI / 2 + 0.06).cyl(0.07, 0.035, 1.05, 8).pop();
+    body.col(red).push().t(-1.5, 0.36, 0).box(0.2, 0.32, 0.02).pop();
+    body.col(white).push().t(-1.42, 0.42, 0).box(0.14, 0.015, 0.36).pop();
+    // mât du rotor, carénage moteur
+    body.col('#cfcac0').push().t(-0.12, 0.52, 0).sphere(0.22, 0.09, 0.15, 10, 5).pop();
+    body.material('metal').col(dark).push().t(-0.05, 0.56, 0).cyl(0.025, 0.025, 0.12, 6).pop();
+    // patins
+    for (const s of [-1, 1]) {
+      body.col(dark).push().t(0.05, 0.0, s * 0.27).rz(Math.PI / 2).t(0, -0.55, 0).cyl(0.018, 0.018, 1.1, 6).pop();
+      for (const x of [-0.25, 0.3]) body.push().t(x, 0.0, s * 0.27).rx(s * 0.35).cyl(0.014, 0.014, 0.17, 5).pop();
+    }
+    // verrière
+    const glass = new MB();
+    glass.material('glass').col('#7fa8b8');
+    glass.push().t(0.36, 0.33, 0).sphere(0.26, 0.2, 0.25, 12, 7).pop();
+    glass.push().t(0.0, 0.36, 0.27).box(0.3, 0.12, 0.01).pop();
+    glass.push().t(0.0, 0.36, -0.27).box(0.3, 0.12, 0.01).pop();
+    // rotors
+    const rotor = new MB();
+    rotor.material('metal').col(dark);
+    rotor.push().t(0, 0, 0).cyl(0.05, 0.05, 0.03, 8, 'both').pop();
+    for (let k = 0; k < 4; k++) rotor.push().ry(k * Math.PI / 2).t(0.62, 0.012, 0).box(1.22, 0.012, 0.07).pop();
+    const tail = new MB();
+    tail.material('metal').col(dark);
+    for (let k = 0; k < 2; k++) tail.push().rz(k * Math.PI / 2).box(0.03, 0.34, 0.012).pop();
+    // caisse en bois cerclée de métal
+    const crate = new MB();
+    crate.material('wood').col('#a07848').box(0.62, 0.5, 0.62);
+    crate.material('metal').col('#55595e');
+    for (const y of [0.06, 0.42]) crate.push().t(0, y, 0).box(0.64, 0.04, 0.64).pop();
+    crate.material('wood').col('#7b5a34');
+    for (const s of [-1, 1]) crate.push().t(s * 0.315, 0.07, 0).rx(0.68).box(0.01, 0.62, 0.05).pop();
+    crate.material('plain').col('#e8c547').push().t(0, 0.2, 0.312).box(0.2, 0.12, 0.004).pop();
+    const cable = new MB();
+    cable.material('plain').col('#2a2a2a').push().t(0, -1, 0).box(0.012, 1, 0.012).pop();
+    return { body: body.finish(), glass: glass.finish(), rotor: rotor.finish(), tail: tail.finish(), crate: crate.finish(), cable: cable.finish() };
+  };
+
+  /* Échafaudage autour d'un chantier (repère local 0..w × 0..d, hauteur hgt). */
+  G.scaffoldMesh = function (w, d, hgt) {
+    const mb = new MB();
+    mb.material('metal').col('#8d9196');
+    const posts = [];
+    const nx = Math.max(2, Math.round(w / 1.6) + 1), nz = Math.max(2, Math.round(d / 1.6) + 1);
+    for (let i = 0; i < nx; i++) { const x = 0.15 + (w - 0.3) * i / (nx - 1); posts.push([x, 0.15], [x, d - 0.15]); }
+    for (let k = 1; k < nz - 1; k++) { const z = 0.15 + (d - 0.3) * k / (nz - 1); posts.push([0.15, z], [w - 0.15, z]); }
+    for (const [x, z] of posts) mb.push().t(x, 0, z).cyl(0.025, 0.025, hgt, 5).pop();
+    const levels = Math.max(1, Math.round(hgt / 0.45));
+    for (let l = 1; l <= levels; l++) {
+      const y = hgt * l / levels;
+      mb.material('metal').col('#8d9196');
+      mb.push().t(w / 2, y, 0.15).box(w - 0.3, 0.025, 0.025).pop().push().t(w / 2, y, d - 0.15).box(w - 0.3, 0.025, 0.025).pop();
+      mb.push().t(0.15, y, d / 2).box(0.025, 0.025, d - 0.3).pop().push().t(w - 0.15, y, d / 2).box(0.025, 0.025, d - 0.3).pop();
+      mb.material('wood').col(l % 2 ? '#b0874f' : '#9c7646');
+      mb.push().t(w / 2, y + 0.02, 0.15).box(w - 0.3, 0.02, 0.16).pop().push().t(w / 2, y + 0.02, d - 0.15).box(w - 0.3, 0.02, 0.16).pop();
+    }
+    // bâches et panneau de chantier
+    mb.material('cloth').col('#d9792d').push().t(0.15, hgt * 0.5, d / 2).box(0.01, hgt * 0.5, d - 0.4).pop();
+    mb.material('plain').col('#f2c230').push().t(w / 2, 0, -0.05).box(0.4, 0.28, 0.02).pop();
+    mb.col('#1e1e1e').push().t(w / 2, 0.08, -0.062).box(0.3, 0.04, 0.004).pop();
+    return mb.finish();
+  };
 })();

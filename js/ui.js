@@ -12,6 +12,9 @@ window.DZ = window.DZ || {};
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const money = U.money;
   const pct = (x) => Math.round(x * 100) + ' %';
+  /* Durée en heures de jeu → « 35 min » ou « 1 h 20 ». */
+  const fmtH = (h) => { const m = Math.max(1, Math.round(h * 60)); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0'); };
+  const SEX = { F: '♀', M: '♂' };
   const TREE_TYPES = ['arbre', 'palmier', 'fougere'];
 
   const TABS = [
@@ -81,7 +84,69 @@ window.DZ = window.DZ || {};
       $('#btn-menu').addEventListener('click', () => this.openMenu());
       $('#st-rating').addEventListener('click', () => this.openStats());
       $('#st-money').addEventListener('click', () => this.openStats());
+      const chip = el('button', 'stat player-chip', '');
+      chip.id = 'st-player';
+      $('.brand').after(chip);
+      chip.addEventListener('click', () => { const p = this.game.pl; if (p) { this.focus(p.x * T, p.y * T); this.sound.play('click'); } });
+      this.refreshPlayer();
       this.refreshSpeed();
+    }
+
+    refreshPlayer() {
+      const chip = $('#st-player'), pl = this.game.s && this.game.s.player;
+      if (!chip || !pl) return;
+      const av = DZ.avatarOf(pl);
+      chip.innerHTML = `<span class="ico">${av.emoji}</span><span class="val">${esc(pl.name)}</span>`;
+      chip.dataset.tip = `${av.title} du parc · ${av.name}. Cliquez pour centrer la vue.`;
+    }
+
+    /* Choix du nom, du genre et de l'avatar au début d'une partie. */
+    avatarThumb(i, g) {
+      const key = 'av' + i + g;
+      return this.thumbs[key] || (this.thumbs[key] = this.r.thumbAvatar ? this.r.thumbAvatar(i, g, 120, 110) : DZ.avatarPortrait(i, g, 120, 110));
+    }
+    openPlayerSetup(opts, onDone) {
+      opts = opts || {};
+      const pl = { name: opts.name || '', gender: opts.gender || 'f', avatar: opts.avatar || 0 };
+      const html = `<h2>${esc(opts.title || 'Nouvelle partie')}</h2><p>${esc(opts.text || 'Qui dirige le parc ? Choisissez votre nom, votre genre et votre avatar : il se rendra sur place à chacune de vos actions.')}</p>
+        <label class="field"><span>Nom</span><input id="pl-name" maxlength="20" value="${esc(pl.name)}" placeholder="Votre nom" autocomplete="off" spellcheck="false"></label>
+        <div class="field"><span>Genre</span><div class="seg" id="pl-gender">${DZ.GENDERS.map((g) => `<button data-g="${g.id}" class="${g.id === pl.gender ? 'on' : ''}">${g.label}</button>`).join('')}</div></div>
+        <div class="grid avatars">${DZ.AVATARS.map((a, i) => `<button class="choice" data-av="${i}"><canvas></canvas><div class="n"></div></button>`).join('')}</div>
+        <div class="btns"><button class="btn primary" data-go>${esc(opts.go || 'Commencer')}</button></div>`;
+      this.modal(html, (card) => {
+        $('#modal').onclick = null; // un choix est attendu
+        const refresh = () => card.querySelectorAll('[data-av]').forEach((btn) => {
+          const i = +btn.dataset.av;
+          btn.classList.toggle('sel', i === pl.avatar);
+          btn.querySelector('.n').textContent = DZ.AVATARS[i].name[pl.gender];
+          const c = btn.querySelector('canvas'), src = this.avatarThumb(i, pl.gender);
+          c.width = src.width; c.height = src.height; c.getContext('2d').drawImage(src, 0, 0);
+        });
+        card.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => {
+          pl.gender = b.dataset.g;
+          card.querySelectorAll('[data-g]').forEach((x) => x.classList.toggle('on', x === b));
+          refresh(); this.sound.play('click');
+        }));
+        card.querySelectorAll('[data-av]').forEach((b) => b.addEventListener('click', () => {
+          pl.avatar = +b.dataset.av;
+          card.querySelectorAll('[data-av]').forEach((x) => x.classList.toggle('sel', x === b));
+          this.sound.play('click');
+        }));
+        const input = card.querySelector('#pl-name');
+        const go = () => {
+          const name = input.value.trim().slice(0, 20) || (pl.gender === 'f' ? 'Directrice' : pl.gender === 'h' ? 'Directeur' : 'Direction');
+          this.closeModal();
+          onDone({ name, gender: pl.gender, avatar: pl.avatar });
+        };
+        card.querySelector('[data-go]').addEventListener('click', go);
+        input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') go(); });
+        refresh();
+        setTimeout(() => input.focus(), 50);
+      });
+    }
+    greet() {
+      const pl = this.game.s.player, av = DZ.avatarOf(pl);
+      this.toast(av.emoji, `Bienvenue, ${pl.gender === 'a' ? '' : av.title + ' '}${esc(pl.name)} ! Votre avatar se rendra sur chaque chantier et auprès de chaque dinosaure.`, 'good');
     }
 
     setSpeed(i) { this.game.setSpeed(i); this.refreshSpeed(); this.sound.play('click'); }
@@ -330,7 +395,7 @@ window.DZ = window.DZ || {};
         const r = g.build(t.type, x, y);
         if (r.ok) {
           this.sound.play('build');
-          if (def.cat !== 'deco' && !g.accessTiles(r.building).length) this.toast('🛤️', `${def.name} construit. Reliez-le à un chemin pour que les visiteurs puissent y accéder.`, 'info');
+          if (def.cat !== 'deco') this.toast('🚧', `Chantier lancé : ${def.name}, prêt dans ≈ ${fmtH(r.building.cons.dur)}.${!g.accessTiles(r.building).length ? ' Reliez-le à un chemin pour que les visiteurs puissent y accéder.' : ''}`, 'info');
           if (def.cat === 'enclos') { this.select({ kind: 'building', id: r.building.id }); this.setTool({ kind: 'select' }); }
         } else this.error(r.reason);
       } else if (t.kind === 'demolish') {
@@ -340,8 +405,8 @@ window.DZ = window.DZ || {};
       } else if (t.kind === 'dino' && !dragging) {
         const b = g.buildingAt(p.x, p.y);
         if (!b || !g.isEnclosure(b)) { this.error('Cliquez sur un enclos'); return; }
-        const r = g.buyDino(t.species, b.id);
-        if (r.ok) { this.sound.play('upgrade'); this.select({ kind: 'building', id: b.id }); }
+        const r = g.buyDino(t.species, b.id, this.defaultSex(b, t.species));
+        if (r.ok) { this.sound.play('upgrade'); this.deliveryToast(r.delivery); this.select({ kind: 'building', id: b.id }); }
         else this.error(r.reason);
       } else if (t.kind === 'move' && !dragging) {
         if (!t.id) {
@@ -539,7 +604,7 @@ window.DZ = window.DZ || {};
 
     dinoHover(d) {
       const sp = DZ.SPECIES[d.sp];
-      return `<b>${esc(d.name)}</b> <span class="t-sub">${esc(sp.name)}</span><div class="t-grid"><span>Bonheur</span><span>${Math.round(d.happiness)} %</span><span>Attractivité</span><span>${Math.round(this.game.dinoAttraction(d))}</span><span>Nourriture / jour</span><span>${money(C.dinos[d.sp].upkeep)}</span><span>Santé</span><span>${d.sick ? '🤒 Malade' : '✓ Bonne'}</span></div>`;
+      return `<b>${esc(d.name)} ${SEX[d.sex] || ''}</b> <span class="t-sub">${esc(sp.name)}${d.young ? ' · bébé' : ''}</span><div class="t-grid"><span>Bonheur</span><span>${Math.round(d.happiness)} %</span><span>Attractivité</span><span>${Math.round(this.game.dinoAttraction(d))}</span><span>Nourriture / jour</span><span>${money(C.dinos[d.sp].upkeep * (d.young ? C.breeding.babyUpkeep : 1))}</span><span>Santé</span><span>${d.sick ? '🤒 Malade' : '✓ Bonne'}</span></div>`;
     }
 
     buildingHover(b) {
@@ -548,8 +613,8 @@ window.DZ = window.DZ || {};
       if (def.cat === 'enclos') grid = `<span>Dinosaures</span><span>${g.dinosIn(b).length}</span><span>Place</span><span>${g.usedSpace(b)} / ${g.capacity(b)}</span><span>Attractivité</span><span>${Math.round(g.enclosureAttraction(b))}</span>`;
       else if (def.cat === 'service') grid = `<span>Revenus</span><span>${money(b.earned || 0)}</span><span>Entretien / jour</span><span>${money(def.upkeep[b.level - 1])}</span>`;
       else if (b.type === 'entree') grid = `<span>Billet</span><span>${money(g.ticketPrice())}</span><span>Visiteurs du jour</span><span>${U.fmt(g.s.today.visitors)}</span>`;
-      const lvl = def.upgrade ? ` · Niveau ${b.level}` : '';
-      const warn = def.cat !== 'deco' && b.type !== 'entree' && !g.isConnected(b) ? '<div class="t-sub" style="color:#f3c3b5">⚠️ Non relié à l\'entrée par un chemin</div>' : '';
+      const lvl = (def.upgrade ? ` · Niveau ${b.level}` : '') + (b.cons ? ` · 🚧 chantier ${Math.round(g.worksProgress(b) * 100)} %` : b.upg ? ` · ⬆ travaux ${Math.round(g.worksProgress(b) * 100)} %` : '');
+      const warn = def.cat !== 'deco' && b.type !== 'entree' && !b.cons && !g.isConnected(b) ? '<div class="t-sub" style="color:#f3c3b5">⚠️ Non relié à l\'entrée par un chemin</div>' : '';
       return `<b>${esc(def.name)}</b><span class="t-sub">${lvl}</span>${warn}<div class="t-grid">${grid}</div>`;
     }
 
@@ -602,11 +667,12 @@ window.DZ = window.DZ || {};
       if (sel.kind === 'building') {
         const b = g.buildings[sel.id];
         if (!b) return 'x';
-        const ds = g.dinosIn(b).map((d) => d.id + ':' + d.sick + d.upHab + d.upCare + Math.round(d.happiness)).join(',');
-        return [b.id, b.level, ds, moneyBand, g.isConnected(b), Math.round(b.earned || 0), b.x, b.y].join('|');
+        const ds = g.dinosIn(b).map((d) => d.id + ':' + d.sick + d.upHab + d.upCare + Math.round(d.happiness) + d.young).join(',');
+        const dl = g.deliveriesTo(b).map((x) => x.id + g.deliveryPhase(x).phase + Math.round(g.deliveryPhase(x).left * 12)).join(',');
+        return [b.id, b.level, ds, dl, moneyBand, g.isConnected(b), Math.round(b.earned || 0), b.x, b.y, Math.round(g.worksProgress(b) * 50), !!b.upg, JSON.stringify(b.breed || {})].join('|');
       }
       const d = g.dinos.find((x) => x.id === sel.id);
-      return d ? [d.id, d.sick, d.upHab, d.upCare, Math.round(d.happiness), moneyBand].join('|') : 'x';
+      return d ? [d.id, d.sick, d.upHab, d.upCare, Math.round(d.happiness), moneyBand, d.young].join('|') : 'x';
     }
 
     buildingPanel(b) {
@@ -614,7 +680,13 @@ window.DZ = window.DZ || {};
       const pips = def.upgrade ? `<span class="pips">${[1, 2, 3].map((i) => `<i class="${i <= b.level ? 'on' : ''}"></i>`).join('')}</span>` : '';
       let h = `<h2>${def.icon} ${esc(def.name)}</h2><div class="sub">${def.upgrade ? 'Niveau ' + b.level + pips : (b.type === 'entree' ? 'Accueil et billetterie' : 'Décoration')}</div>`;
       const connected = g.isConnected(b);
-      if (def.cat !== 'deco' && b.type !== 'entree' && !connected) h += '<div class="warn">⚠️ Ce bâtiment n\'est pas relié à l\'entrée par un chemin : les visiteurs ne peuvent pas y accéder.</div>';
+      if (b.cons || b.upg) {
+        const p = g.worksProgress(b);
+        const what = b.cons ? `🚧 Chantier en cours · ${Math.round(p * 100)} %` : `⬆ Travaux vers le niveau ${b.level + 1} · ${Math.round(p * 100)} %`;
+        const after = b.cons ? (def.cat === 'enclos' ? 'Vous pourrez y installer des dinosaures à la fin des travaux.' : def.cat === 'service' ? 'Les visiteurs pourront en profiter à la fin des travaux.' : '') : 'Le bâtiment reste ouvert pendant les travaux.';
+        h += `<div class="works"><div class="works-h">${what}</div><div class="meter"><i class="works-bar" style="width:${Math.round(p * 100)}%"></i></div><div class="works-s">Fin dans ≈ ${fmtH(g.worksLeft(b))}. ${after}</div></div>`;
+      }
+      if (def.cat !== 'deco' && b.type !== 'entree' && !connected && !b.cons) h += '<div class="warn">⚠️ Ce bâtiment n\'est pas relié à l\'entrée par un chemin : les visiteurs ne peuvent pas y accéder.</div>';
       if (def.cat === 'enclos') {
         const dinos = g.dinosIn(b);
         const cap = g.capacity(b), used = g.usedSpace(b);
@@ -626,13 +698,28 @@ window.DZ = window.DZ || {};
         if (c) h += `<div class="warn">⚠️ Le ${DZ.SPECIES[c.predator].name} va attaquer le ${DZ.SPECIES[c.prey].name} ! Déplacez l'un d'eux dans un autre enclos (vendez et rachetez).</div>`;
         if (b.level === 1 && dinos.some((d) => DZ.SPECIES[d.sp].predator && DZ.SPECIES[d.sp].size === 'L')) h += '<div class="warn">⚠️ Une simple palissade ne retiendra pas longtemps un grand prédateur. Améliorez la clôture pour éviter les évasions.</div>';
         h += '<div class="section"><h3>Pensionnaires</h3>';
-        if (!dinos.length) h += '<div class="info">Cet enclos est vide. Ajoutez un dinosaure pour attirer les visiteurs.</div>';
+        const incoming = g.deliveriesTo(b);
+        if (!dinos.length && !incoming.length) h += `<div class="info">${b.cons ? 'L\'enclos sera prêt à la fin du chantier.' : 'Cet enclos est vide. Ajoutez un dinosaure pour attirer les visiteurs.'}</div>`;
         for (const d of dinos) {
           const sp = DZ.SPECIES[d.sp];
           const hp = Math.round(d.happiness);
-          h += `<div class="dino-row" data-act="dino" data-id="${d.id}"><canvas data-thumb="${d.sp}"></canvas><div><div class="n">${esc(d.name)} ${d.sick ? '🤒' : ''}</div><div class="s">${esc(sp.short || sp.name)} · ❤ ${hp} % · ★ ${Math.round(g.dinoAttraction(d))}</div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div></div></div>`;
+          h += `<div class="dino-row" data-act="dino" data-id="${d.id}"><canvas data-thumb="${d.sp}"></canvas><div><div class="n">${esc(d.name)} <span class="sex ${d.sex}">${SEX[d.sex] || ''}</span>${d.young ? ' <span class="baby">bébé</span>' : ''} ${d.sick ? '🤒' : ''}</div><div class="s">${esc(sp.short || sp.name)} · ❤ ${hp} % · ★ ${Math.round(g.dinoAttraction(d))}</div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div></div></div>`;
         }
-        h += `<button class="btn wide" data-act="add" ${used >= cap ? 'disabled' : ''}>＋ Ajouter un dinosaure</button></div>`;
+        for (const dl of incoming) {
+          const sp = DZ.SPECIES[dl.sp], ph = g.deliveryPhase(dl);
+          const st = ph.phase === 'prep' ? `en préparation · arrivée dans ≈ ${fmtH(ph.left)}` : ph.phase === 'fly' ? 'hélicoptère en approche' : 'livraison en cours…';
+          h += `<div class="dino-row incoming"><canvas data-thumb="${dl.sp}"></canvas><div><div class="n">🚁 ${esc(dl.name)} <span class="sex ${dl.sex}">${SEX[dl.sex]}</span></div><div class="s">${esc(sp.short || sp.name)} · ${st}</div><div class="meter"><i class="works-bar" style="width:${Math.round(U.clamp(dl.t / g.deliveryTotal(dl), 0, 1) * 100)}%"></i></div></div></div>`;
+        }
+        // reproduction
+        const species = [...new Set(dinos.filter((d) => !d.young).map((d) => d.sp))];
+        for (const spId of species) {
+          const bi = g.breedingInfo(b, spId), sp = DZ.SPECIES[spId];
+          if (bi.pending) h += `<div class="info breed">🐣 ${esc(sp.short || sp.name)} : une naissance est attendue aujourd'hui !</div>`;
+          else if (bi.pair && !bi.happyOk) h += `<div class="info breed">💞 ${esc(sp.short || sp.name)} : couple formé, mais trop peu heureux pour avoir des petits.</div>`;
+          else if (bi.pair) { const left = Math.max(1, bi.need - bi.days); h += `<div class="info breed">💞 ${esc(sp.short || sp.name)} : couple formé — naissance probable dans ${left} jour${left > 1 ? 's' : ''}.</div>`; }
+          else h += `<div class="info breed">💡 ${esc(sp.short || sp.name)} : ajoutez ${bi.m ? 'une femelle ♀' : 'un mâle ♂'} pour avoir des petits.</div>`;
+        }
+        h += `<button class="btn wide" data-act="add" ${used >= cap || b.cons ? 'disabled' : ''}>＋ Ajouter un dinosaure</button></div>`;
       } else if (def.cat === 'service') {
         const lv = b.level - 1;
         h += '<div class="rows">';
@@ -648,14 +735,14 @@ window.DZ = window.DZ || {};
       }
       // amélioration
       const up = g.upgradeCost(b);
-      if (def.upgrade) {
+      if (def.upgrade && !b.cons && !b.upg) {
         if (up != null) {
           h += `<div class="section"><h3>Amélioration</h3><div class="info">${this.upgradeText(b)}</div><button class="btn primary wide" data-act="upgrade" ${s.money < up ? 'disabled' : ''}>⬆ Améliorer au niveau ${b.level + 1} <span class="cost">${money(up)}</span></button></div>`;
         } else h += '<div class="section"><div class="info">✨ Niveau maximal atteint.</div></div>';
       }
       if (!b.fixed) {
         const refund = Math.round(b.invested * C.economy.refundRate);
-        h += `<div class="btns"><button class="btn" data-act="move">✋ Déplacer</button><button class="btn danger" data-act="demolish">🧨 Démolir (+${money(refund)})</button></div>`;
+        h += `<div class="btns"><button class="btn" data-act="move" ${g.busy(b) ? 'disabled' : ''}>✋ Déplacer</button><button class="btn danger" data-act="demolish">🧨 Démolir (+${money(refund)})</button></div>`;
       }
       return h;
     }
@@ -677,12 +764,13 @@ window.DZ = window.DZ || {};
       const g = this.game, sp = DZ.SPECIES[d.sp], bal = C.dinos[d.sp], s = g.s, up = C.economy.dinoUpgrades;
       const b = g.buildings[d.enc];
       const hp = Math.round(d.happiness);
-      let h = `<h2>${esc(d.name)}</h2><div class="sub">${esc(sp.name)} · ${DZ.FAMILIES[sp.family].name}</div>`;
+      let h = `<h2>${esc(d.name)} <span class="sex ${d.sex}">${SEX[d.sex] || ''}</span></h2><div class="sub">${esc(sp.name)} ${d.sex === 'F' ? 'femelle' : 'mâle'}${d.young ? ' · bébé' : ''} · ${DZ.FAMILIES[sp.family].name}</div>`;
+      if (d.young) { const left = Math.max(1, C.breeding.growDays[sp.size || 'M'] - (s.day - d.born)); h += `<div class="info">🍼 Né${d.sex === 'F' ? 'e' : ''} dans le parc le jour ${d.born}. Adulte dans ${left} jour${left > 1 ? 's' : ''}.</div>`; }
       h += `<canvas class="big-thumb" data-thumb="${d.sp}"></canvas>`;
       h += `<div class="desc">${esc(sp.desc)}</div>`;
       h += `<div class="rows"><span class="k">Régime</span><span class="v">${sp.diet}</span><span class="k">Époque</span><span class="v">${sp.period}</span><span class="k">Taille</span><span class="v">${sp.length}</span>`;
       h += `<span class="k">Attractivité</span><span class="v">${Math.round(g.dinoAttraction(d))} <span style="color:var(--muted);font-weight:400">(base ${bal.attraction})</span></span>`;
-      h += `<span class="k">Nourriture / jour</span><span class="v">${money(bal.upkeep)}</span><span class="k">Arrivé le</span><span class="v">jour ${d.born}</span></div>`;
+      h += `<span class="k">Nourriture / jour</span><span class="v">${money(bal.upkeep * (d.young ? C.breeding.babyUpkeep : 1))}</span><span class="k">${d.young ? 'Né' : 'Arrivé'}${d.sex === 'F' ? 'e' : ''} le</span><span class="v">jour ${d.born}</span></div>`;
       h += `<div class="rows"><span class="k">Bonheur</span><span class="v">${hp} %</span></div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div>`;
       if (sp.social && !g.dinos.some((o) => o !== d && o.enc === d.enc && o.sp === d.sp)) h += '<div class="info">👥 Espèce grégaire : un congénère le rendrait plus heureux.</div>';
       if (d.sick) h += `<div class="warn">🤒 Malade depuis ${d.sickDays} jour${d.sickDays > 1 ? 's' : ''}. Sans soins, il ne survivra pas au-delà de ${C.events.sickDaysToDeath} jours.</div><button class="btn primary wide" data-act="treat" ${s.money < g.treatCost(d) ? 'disabled' : ''}>💉 Soigner <span class="cost">${money(g.treatCost(d))}</span></button>`;
@@ -708,7 +796,7 @@ window.DZ = window.DZ || {};
       if (act === 'enc') { this.select({ kind: 'building', id: +t.dataset.id }); return; }
       if (sel.kind === 'building') {
         const b = g.buildings[sel.id];
-        if (act === 'upgrade') { const r = g.upgrade(b.id); if (r.ok) { this.sound.play('upgrade'); this.toast('✨', `${C.buildings[b.type].name} amélioré au niveau ${b.level} !`, 'good'); } else this.error(r.reason); }
+        if (act === 'upgrade') { const r = g.upgrade(b.id); if (r.ok) { this.sound.play('build'); this.toast('🚧', `Travaux d'amélioration lancés : ${C.buildings[b.type].name}, niveau ${b.level + 1} dans ≈ ${fmtH(r.hours)}.`, 'info'); } else this.error(r.reason); }
         else if (act === 'demolish') this.demolish(b);
         else if (act === 'move') this.setTool({ kind: 'move', id: b.id });
         else if (act === 'add') this.openAddDino(b);
@@ -724,23 +812,41 @@ window.DZ = window.DZ || {};
       this.renderPanel();
     }
 
+    /* Sexe proposé : celui qui permet de former des couples dans l'enclos. */
+    defaultSex(b, spId) {
+      const g = this.game;
+      const list = g.dinosIn(b).filter((d) => !spId || d.sp === spId).map((d) => d.sex).concat(g.deliveriesTo(b).filter((x) => !spId || x.sp === spId).map((x) => x.sex));
+      const f = list.filter((x) => x === 'F').length, m = list.length - f;
+      return f > m ? 'M' : m > f ? 'F' : (list.length % 2 ? 'M' : 'F');
+    }
+    deliveryToast(dl) {
+      const sp = DZ.SPECIES[dl.sp];
+      this.toast('🚁', `${esc(dl.name)}, ${esc(sp.name)} ${dl.sex === 'F' ? 'femelle' : 'mâle'}, est en préparation : livraison par hélicoptère dans ≈ ${fmtH(this.game.deliveryTotal(dl))}.`, 'info');
+    }
     openAddDino(b) {
       const g = this.game;
       const list = DZ.SPECIES_ORDER.filter((id) => g.habitatOk(id, b));
-      let h = `<h2>Ajouter un dinosaure</h2><p>${esc(C.buildings[b.type].name)} · place libre : ${g.capacity(b) - g.usedSpace(b)}</p><div class="grid">`;
+      let sex = this.defaultSex(b);
+      let h = `<h2>Ajouter un dinosaure</h2><p>${esc(C.buildings[b.type].name)} · place libre : ${g.capacity(b) - g.usedSpace(b)}. Livraison par hélicoptère ; un mâle et une femelle de la même espèce auront des petits.</p>
+        <div class="field"><span>Sexe</span><div class="seg" id="sex-seg"><button data-sex="F" class="${sex === 'F' ? 'on' : ''}">♀ Femelle</button><button data-sex="M" class="${sex === 'M' ? 'on' : ''}">♂ Mâle</button></div></div><div class="grid">`;
       for (const id of list) {
         const sp = DZ.SPECIES[id], bal = C.dinos[id];
         const c = g.canAddDino(id, b);
         const locked = !g.s.unlocked[id];
-        const why = locked ? `🔒 Jour ${bal.unlockDay}${bal.unlockRating ? ' · ' + bal.unlockRating + ' ★' : ''}` : c.ok ? (c.warning ? '⚠️ Conflit avec les pensionnaires' : `Place ${bal.space} · ★ ${bal.attraction}`) : c.reason;
+        const why = locked ? `🔒 Jour ${bal.unlockDay}${bal.unlockRating ? ' · ' + bal.unlockRating + ' ★' : ''}` : c.ok ? (c.warning ? '⚠️ Conflit avec les pensionnaires' : `Place ${bal.space} · ★ ${bal.attraction} · 🚁 ${fmtH(g.deliveryHours(id) + C.delivery.flight + C.delivery.hover)}`) : c.reason;
         h += `<button class="choice" data-sp="${id}" ${c.ok ? '' : 'disabled'} data-tip="${esc(this.dinoTip(id))}"><canvas data-thumb="${id}"></canvas><div class="n">${esc(sp.short || sp.name)} · ${money(bal.price)}</div><div class="s">${why}</div></button>`;
       }
       h += '</div><div class="btns"><button class="btn" data-close>Fermer</button></div>';
       this.modal(h, (card) => {
         card.querySelectorAll('canvas[data-thumb]').forEach((c) => { const src = R.dinoThumb(c.dataset.thumb, 140, 70); c.width = src.width; c.height = src.height; c.getContext('2d').drawImage(src, 0, 0); });
+        card.querySelectorAll('[data-sex]').forEach((btn) => btn.addEventListener('click', () => {
+          sex = btn.dataset.sex;
+          card.querySelectorAll('[data-sex]').forEach((x) => x.classList.toggle('on', x === btn));
+          this.sound.play('click');
+        }));
         card.querySelectorAll('[data-sp]').forEach((btn) => btn.addEventListener('click', () => {
-          const r = g.buyDino(btn.dataset.sp, b.id);
-          if (r.ok) { this.sound.play('upgrade'); this.closeModal(); this.renderPanel(); } else this.error(r.reason);
+          const r = g.buyDino(btn.dataset.sp, b.id, sex);
+          if (r.ok) { this.sound.play('upgrade'); this.deliveryToast(r.delivery); this.closeModal(); this.renderPanel(); } else this.error(r.reason);
         }));
       });
     }
@@ -910,7 +1016,10 @@ window.DZ = window.DZ || {};
       g.on('escape', () => { this.sound.play('alarm'); if (this.sound.music) this.sound.music.alert(); });
       g.on('watched', (e) => { if (e.gain > 16 && Math.random() < 0.25) this.sound.crowdReact('ooh'); });
       g.on('dinoAdded', (d) => { if (C.dinos[d.sp].attraction >= 80 && this.sound.music) this.sound.music.wonder(); });
-      g.on('reset', () => { this.moneyShown = g.s.money; this.select(null); this.buildItems(); this.mmBase = null; this.mmDirty = true; });
+      g.on('reset', () => { this.moneyShown = g.s.money; this.select(null); this.buildItems(); this.mmBase = null; this.mmDirty = true; this.refreshPlayer(); });
+      g.on('player', () => this.refreshPlayer());
+      g.on('dinoBorn', (d) => { this.sound.dino(d.sp, this.pos3(d.x, d.y, 0.4), false); });
+      g.on('constructed', (b) => { if (C.buildings[b.type].cat !== 'deco') this.sound.play('upgrade'); });
       g.on('mapChanged', () => { this.mmDirty = true; });
     }
 
@@ -924,6 +1033,14 @@ window.DZ = window.DZ || {};
         if (this.panelSel && this.panelKey() !== this._panelKey) this.renderPanel();
         this.refreshItems();
         this.sound.setEnv(this.game.s.hour, this.game.stormIntensity());
+        if (this.game.speed) {
+          const cx = this.r.is3D ? this.r.cam.tx : this.r.cam.x / T, cz = this.r.is3D ? this.r.cam.tz : this.r.cam.y / T;
+          for (const id in this.game.buildings) {
+            const b = this.game.buildings[id];
+            if (!this.game.busy(b) || C.buildings[b.type].cat === 'deco') continue;
+            if (Math.hypot(b.x + b.w / 2 - cx, b.y + b.h / 2 - cz) < 45 && Math.random() < 0.55) this.sound.play('hammer', { pos: this.pos3(b.x + Math.random() * b.w, b.y + Math.random() * b.h, 0.3) });
+          }
+        }
         this.drawMinimap();
       }
     }

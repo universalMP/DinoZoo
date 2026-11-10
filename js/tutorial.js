@@ -12,7 +12,7 @@ window.DZ = window.DZ || {};
     },
     {
       title: 'Construisez un enclos',
-      text: 'Ouvrez l\'onglet <b>Enclos</b> et placez un <b>Petit enclos</b> le long d\'un chemin. Les cases vertes indiquent le chemin qui y donne accès.',
+      text: 'Ouvrez l\'onglet <b>Enclos</b> et placez un <b>Petit enclos</b> le long d\'un chemin. Les cases vertes indiquent le chemin qui y donne accès. Le chantier prend un peu de temps : votre avatar va superviser les travaux.',
       todo: 'Construire un enclos relié à un chemin',
       check: (g) => anyBuilt(g, (b) => g.isEnclosure(b) && g.isConnected(b)),
       highlight: '[data-tab="enclos"]',
@@ -20,7 +20,7 @@ window.DZ = window.DZ || {};
     },
     {
       title: 'Votre premier dinosaure',
-      text: 'Dans l\'onglet <b>Dinosaures</b>, choisissez le <b>Compsognathus</b> ou le <b>Dryosaurus</b>, puis cliquez sur votre enclos. Les espèces grégaires aiment vivre à plusieurs !',
+      text: 'Dans l\'onglet <b>Dinosaures</b>, choisissez le <b>Compsognathus</b> ou le <b>Dryosaurus</b>, puis cliquez sur votre enclos. Il sera livré par hélicoptère ! Un mâle et une femelle de la même espèce auront des petits.',
       todo: 'Installer un dinosaure',
       check: (g) => g.dinos.length > 0,
       highlight: '[data-tab="dinos"]',

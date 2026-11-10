@@ -15,6 +15,9 @@ Construisez des chemins depuis l'entrée, des enclos reliés à ces chemins, pui
 - **Un vaste domaine** de 192 × 136 cases : montagnes enneigées, lac, rivières, mer et plages, forêts, jungle et plaines, avec une minicarte pour s'y déplacer.
 - **20 espèces** réparties en 5 familles : petits herbivores, grands herbivores et géants, carnivores, reptiles volants, reptiles marins.
 - Les espèces se débloquent avec les jours et la **note du parc**.
+- **Votre avatar** (nom, genre et tenue choisis à chaque partie) se rend sur chaque chantier et auprès de chaque dinosaure.
+- **Des chantiers qui prennent du temps** selon le prix, et des dinosaures **livrés par hélicoptère**.
+- **Des naissances** : un mâle et une femelle heureux de la même espèce ont des petits, qui grandissent.
 - **3 niveaux** pour chaque enclos, boutique, restaurant et toilettes.
 - Événements aléatoires : affluence, orages, maladies, critiques, mécènes… et évasions si vos clôtures sont trop faibles.
 - Cycle jour et nuit, météo.

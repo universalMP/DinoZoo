@@ -54,9 +54,15 @@ window.DZ = window.DZ || {};
       ui.buildItems();
       if (manual) { const s = DZ.Save.settings(); s.quality = q; DZ.Save.setSettings(s); }
     };
-    ui.onReset = () => {
+    // profil du joueur : demandé à chaque nouvelle partie (et une fois pour les anciennes sauvegardes)
+    const askPlayer = (opts, done) => {
+      const prev = game.speedIndex;
+      game.setSpeed(0); ui.refreshSpeed();
+      ui.openPlayerSetup(opts, (p) => { done(p); game.setSpeed(prev || 1); ui.refreshSpeed(); });
+    };
+    ui.onReset = () => askPlayer({ title: 'Nouvelle partie', go: 'Commencer la partie', name: game.s.player.set ? game.s.player.name : '', gender: game.s.player.gender, avatar: game.s.player.avatar }, (p) => {
       DZ.Save.clear();
-      game.newGame();
+      game.newGame(undefined, Object.assign(p, { set: true }));
       if (renderer.resetCamera) renderer.resetCamera();
       else {
         renderer.cam.x = (C.map.entrance.tileX + 0.5) * C.map.tile;
@@ -66,9 +72,9 @@ window.DZ = window.DZ || {};
       renderer.particles.length = 0;
       game.setSpeed(1); ui.refreshSpeed();
       DZ.Save.save(game);
-      ui.toast('🦖', 'Nouvelle partie ! Bienvenue dans votre parc.', 'good');
+      ui.greet();
       DZ.tutorial.start(true);
-    };
+    });
 
     const resize = () => renderer.resize();
     window.addEventListener('resize', resize);
@@ -104,6 +110,9 @@ window.DZ = window.DZ || {};
           }
           audioT += dt;
           if (audioT > 0.3) { audioT = 0; sound.analyze(game, renderer); }
+          const helis = [];
+          for (const dl of game.s.deliveries) { const p = game.deliveryPose(dl); if (p) helis.push({ id: dl.id, x: p.x, y: 0.6 + p.alt * 8.5, z: p.y }); }
+          sound.heliSync(helis);
         }
       } catch (err) {
         console.error(err);
@@ -126,8 +135,19 @@ window.DZ = window.DZ || {};
     // affichage
     setTimeout(() => {
       document.getElementById('loading').classList.add('done');
-      if (resumed) ui.toast('💾', `Bon retour au parc ! Reprise au jour ${game.s.day}.`, 'good');
-      DZ.tutorial.start(false);
+      if (!game.s.player.set) {
+        askPlayer(resumed
+          ? { title: 'Qui dirige le parc ?', text: 'Nouveauté : votre parc a maintenant un directeur ou une directrice. Choisissez votre nom, votre genre et votre avatar : il se rendra sur place à chacune de vos actions.', go: 'Reprendre la partie' }
+          : { title: 'Bienvenue à DinoZoo !', go: 'Ouvrir le parc' }, (p) => {
+          game.setPlayer(p);
+          DZ.Save.save(game);
+          ui.greet();
+          DZ.tutorial.start(false);
+        });
+      } else {
+        if (resumed) ui.toast('💾', `Bon retour au parc, ${game.s.player.name} ! Reprise au jour ${game.s.day}.`, 'good');
+        DZ.tutorial.start(false);
+      }
     }, 250);
 
     // accès pour le débogage dans la console

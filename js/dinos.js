@@ -155,3 +155,15 @@ DZ.DINO_NAMES = [
   'Violette', 'Ulysse', 'Iris', 'Tonnerre', 'Cerise', 'Ambre', 'Jasper', 'Margot', 'Rubis', 'Félix',
   'Dune', 'Nougat', 'Oscar', 'Saphir', 'Tempête', 'Vanille', 'Hermès', 'Pixel', 'Jade', 'Lucky'
 ];
+/* Noms selon le sexe (les femelles et les mâles reçoivent un nom qui leur va). */
+DZ.DINO_NAMES_F = [
+  'Luna', 'Perle', 'Olive', 'Brindille', 'Noisette', 'Praline', 'Capucine', 'Fougère', 'Céleste', 'Pistache',
+  'Mimosa', 'Cannelle', 'Frimousse', 'Pépite', 'Violette', 'Iris', 'Cerise', 'Ambre', 'Margot', 'Dune',
+  'Vanille', 'Jade', 'Bijou', 'Tempête', 'Caramel', 'Sésame', 'Rose', 'Opale', 'Gaïa', 'Myrtille'
+];
+DZ.DINO_NAMES_M = [
+  'Rocky', 'Gaston', 'Titan', 'Hector', 'Zéphyr', 'Mistral', 'Galet', 'Basile', 'Orage', 'Granit',
+  'Sirocco', 'Ulysse', 'Tonnerre', 'Jasper', 'Félix', 'Nougat', 'Oscar', 'Saphir', 'Hermès', 'Pixel',
+  'Lucky', 'Rubis', 'Achille', 'Bruno', 'Cactus', 'Igor', 'Marius', 'Silex', 'Tobias', 'Volcan'
+];
+DZ.dinoName = function (sex, i) { const l = sex === 'F' ? DZ.DINO_NAMES_F : DZ.DINO_NAMES_M; return l[i % l.length]; };

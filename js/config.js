@@ -142,6 +142,42 @@ DZ.CONFIG = {
   familyBonus: 12,          // attractivité par famille représentée
   socialAlonePenalty: 15,   // perte de bonheur d'une espèce grégaire seule
 
+  /* ---------- Chantiers (durées en heures de jeu ; 1 h ≈ 13 s à vitesse normale) ---------- */
+  construction: {
+    baseHours: 0.15,          // durée minimale d'un chantier
+    hoursPer1000: 0.16,       // durée ajoutée par tranche de 1 000 € de coût
+    maxHours: 4.5,
+    upgradeFactor: 1.1        // une amélioration dure un peu plus qu'une construction au même prix
+  },
+
+  /* ---------- Livraison des dinosaures par hélicoptère ---------- */
+  delivery: {
+    prepBase: 0.3,            // préparation (capture, mise en caisse) : prepBase + prepLog × log10(prix / 500)
+    prepLog: 0.45,
+    flight: 0.4,              // vol d'approche
+    hover: 0.32,              // vol stationnaire pendant la descente de la caisse
+    leave: 0.4                // départ de l'hélicoptère
+  },
+
+  /* ---------- Reproduction ---------- */
+  breeding: {
+    minHappiness: 50,                 // bonheur moyen minimal du couple
+    days: { S: 2, M: 3, L: 4 },       // jours de vie commune avant une naissance
+    growDays: { S: 2, M: 3, L: 4 },   // jours pour qu'un bébé devienne adulte
+    babyScale: 0.42,                  // taille d'un nouveau-né
+    babySpace: 0.5,                   // place occupée par un bébé (fraction de l'adulte)
+    babyAttraction: 1.15,             // les bébés attirent un peu plus (attendrissants)
+    babyUpkeep: 0.5,
+    babyValue: 0.4                    // valeur d'un bébé (fraction du prix)
+  },
+
+  /* ---------- Directeur ou directrice du parc (avatar) ---------- */
+  player: {
+    walkSpeed: 2.4,           // cases par seconde de jeu ; accélère sur les longues distances
+    maxTripSeconds: 7,        // un trajet ne dure jamais plus que ça (il court, puis file en quad)
+    workSeconds: 5            // temps passé sur place avant la tâche suivante
+  },
+
   /* ---------- Événements ---------- */
   events: {
     firstDay: 3,

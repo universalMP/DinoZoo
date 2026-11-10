@@ -84,6 +84,8 @@
       this.rigCache = {};
       this.treeMeshes = {};
       this.ghostCache = {};
+      this.worksCache = new Map();
+      this.helis = [];
       this._dirtyWorld = true;
       this._dirtyStatic = true;
       this.view = { x0: 0, y0: 0, x1: W * T, y1: H * T };
@@ -111,6 +113,9 @@
       game.on('upgraded', (b) => this.burst3((b.x + b.w / 2), (b.y + b.h / 2), b.w * 0.6, 'sparkle'));
       game.on('demolished', (e) => this.burst3(e.x, e.y, 0.5, 'dust'));
       game.on('dinoAdded', (d) => this.burst3(d.x, d.y, 0.4, 'sparkle'));
+      game.on('constructed', (b) => { this._dirtyStatic = true; this.burst3(b.x + b.w / 2, b.y + b.h / 2, b.w * 0.6, 'sparkle'); });
+      game.on('delivered', (e) => { this.burst3(e.dino.x, e.dino.y, 0.7, 'dust'); this.burst3(e.dino.x, e.dino.y, 0.5, 'sparkle'); });
+      game.on('dinoBorn', (d) => this.burst3(d.x, d.y, 0.3, 'sparkle'));
       game.on('roar', (d) => { if ((d.sp === 'trex' || d.sp === 'spinosaurus') && this.cam.dist < 25 && Math.hypot(d.x - this.cam.tx, d.y - this.cam.tz) < this.cam.dist * 1.2) this.shake = Math.max(this.shake, d.sp === 'trex' ? 1 : 0.6); });
       game.on('splash', (d) => this.burst3(d.x, d.y, 0.3, 'splash'));
       game.on('escape', () => { this.shake = 1.2; });
@@ -360,6 +365,7 @@
       this.lights = []; this.smoke = []; this.fountains = [];
       for (const id in g.buildings) {
         const b = g.buildings[id], def = C.buildings[b.type];
+        if (b.cons) continue; // chantier : dessiné à part, il sort de terre
         const h = w.buildingHeight(b);
         if (def.cat === 'enclos') {
           mb.push().t(b.x, h, b.y);
@@ -425,9 +431,10 @@
       const gy = this.world.heightAt(x, z);
       const root = M4.create();
       const seedT = t + d.id * 3.1;
+      const kAge = this.game.dinoScale ? this.game.dinoScale(d) : 1;
       if (sp.habitat === 'air') {
         const alt = 0.75 + (d.alt - 18) / 22 * 0.55;
-        M4.translate(root, x, gy + alt, z); M4.rotY(root, -st.heading);
+        M4.translate(root, x, gy + alt, z); M4.rotY(root, -st.heading); if (kAge < 1) M4.scale(root, kAge, kAge, kAge);
         const flap = d.phase ? Math.sin(d.phase) * 0.55 : 0.05;
         out.push([rig.body, root]);
         const hd = M4.copy(root); M4.translate(hd, rig.bl * 0.45, 0, 0); M4.rotY(hd, Math.sin(t * 0.8 + d.id) * 0.25); out.push([rig.head, hd]);
@@ -437,7 +444,7 @@
       }
       if (sp.habitat === 'water') {
         const y = G.WATER_Y - 0.13 + d.surf * 0.14;
-        M4.translate(root, x, y, z); M4.rotY(root, -st.heading);
+        M4.translate(root, x, y, z); M4.rotY(root, -st.heading); if (kAge < 1) M4.scale(root, kAge, kAge, kAge);
         const ph = d.phase || 0;
         if (rig.plan === 'plesio') {
           out.push([rig.body, root]);
@@ -468,7 +475,7 @@
       const state = d.state || 'idle';
       const rest = state === 'rest';
       const bob = moving ? -Math.abs(Math.sin(phase)) * (rig.quad ? 0.012 : 0.03) : Math.sin(seedT * 1.7) * 0.004;
-      M4.translate(root, x, gy, z); M4.rotY(root, -st.heading);
+      M4.translate(root, x, gy, z); M4.rotY(root, -st.heading); if (kAge < 1) M4.scale(root, kAge, kAge, kAge);
       const hip = M4.copy(root);
       M4.translate(hip, 0, rig.hipH + bob - (rest ? rig.hipH * 0.2 : 0), 0);
       if (moving) M4.rotZ(hip, Math.sin(phase * 2) * 0.012);
@@ -523,7 +530,7 @@
         out.push([rig.arm.mesh, am]);
       }
       if (state === 'roar' && d.anim < 0.3 && C.dinos[d.sp].space >= 5 && Math.random() < 0.3) this.burst3(x, z, 0.3, 'dust');
-      return { x, y: gy, z, r: rig.len * 0.5, h: rig.height, head: headPos };
+      return { x, y: gy, z, r: rig.len * 0.5 * kAge, h: rig.height * kAge, head: headPos };
     }
 
     /* ------------------------------------------------------------------
@@ -742,6 +749,10 @@
       }
       if (speed) this._frozenT = null;
       this.poses = poses;
+      this.glassParts = [];
+      this.worksParts(parts);
+      this.heliParts(parts, this.glassParts, t);
+      this.avatarParts(parts, t);
       this.buildPeople(t);
       this.updateParticles(dt * (speed ? Math.min(speed, 2) : 0.5), hour);
 
@@ -834,6 +845,9 @@
       this.setCommon(lit, Lt);
       gl.uniform1f(lit.u.uAlpha, 0.28);
       this.drawMesh(lit, this.glass);
+      gl.uniform1f(lit.u.uAlpha, 0.55);
+      for (const [mesh, mat] of this.glassParts) this.drawMesh(lit, mesh, mat);
+      gl.uniform1f(lit.u.uAlpha, 0.28);
       // superpositions (fantôme, sélection)
       this.drawOverlays3D(lit, Lt, t);
       gl.depthMask(true);
@@ -842,6 +856,128 @@
       gl.disable(gl.BLEND);
       // calque 2D
       this.drawOverlay2D(Lt, t, hour);
+    }
+
+    /* ------------------------------------------------------------------
+       Chantiers : le bâtiment sort de terre dans son échafaudage
+       ------------------------------------------------------------------ */
+    worksMesh(b) {
+      const key = b.type + ':' + b.level + ':' + b.x + ':' + b.y;
+      let e = this.worksCache.get(b.id);
+      if (e && e.key === key) return e;
+      if (e) { G.free(this.gl, e.mesh); G.free(this.gl, e.scaf); }
+      const gl = this.gl, w = this.world, def = C.buildings[b.type];
+      const h = w.buildingHeight(b);
+      const mb = new G.MB(), glass = new G.MB();
+      if (def.cat === 'enclos') { mb.push().t(b.x, h, b.y); glass.push().t(b.x, h, b.y); G.enclosureInto(mb, glass, b, w); glass.pop(); mb.pop(); }
+      else if (b.type === 'arbre' || b.type === 'palmier' || b.type === 'fougere') { mb.push().t(b.x + 0.5, h, b.y + 0.55).s(1.1); mb.add(G.treeMesh(b.type === 'arbre' ? 'araucaria' : b.type, 0)); mb.pop(); }
+      else { mb.push().t(b.x, h, b.y); G.buildingInto(mb, b); mb.pop(); }
+      const data = mb.finish();
+      const top = data.bounds.y1 > -1e8 ? data.bounds.y1 - h : 1;
+      const hgt = U.clamp(top * 1.05, 0.35, 2.4);
+      e = { key, mesh: G.upload(gl, data), scaf: def.cat === 'deco' ? null : G.upload(gl, G.scaffoldMesh(b.w, b.h, hgt)), h, hgt };
+      this.worksCache.set(b.id, e);
+      return e;
+    }
+    worksParts(parts) {
+      const g = this.game, ax = this.cam.tx, az = this.cam.tz, R2 = this.cam.dist * 2 + 24;
+      const seen = new Set();
+      this.works = [];
+      for (const id in g.buildings) {
+        const b = g.buildings[id];
+        if (!g.busy(b)) continue;
+        seen.add(b.id);
+        if (Math.abs(b.x + b.w / 2 - ax) > R2 || Math.abs(b.y + b.h / 2 - az) > R2) continue;
+        const e = this.worksMesh(b);
+        const p = g.worksProgress(b);
+        if (b.cons) {
+          const k = 0.06 + 0.94 * p;
+          const m = M4.create(); M4.translate(m, 0, e.h, 0); M4.scale(m, 1, k, 1); M4.translate(m, 0, -e.h, 0);
+          parts.push([e.mesh, m]);
+        }
+        if (e.scaf) {
+          const base = M4.create(); M4.translate(base, b.x, e.h, b.y);
+          parts.push([e.scaf, base]);
+          this.works.push({ b, x: b.x + b.w / 2, y: e.h + e.hgt + 0.35, z: b.y + b.h / 2, p });
+          if (g.speed && Math.random() < 0.05 * Math.min(2, g.speed)) this.addP({ k: 'dust', x: b.x + 0.3 + Math.random() * (b.w - 0.6), y: e.h + 0.05, z: b.y + 0.3 + Math.random() * (b.h - 0.6), vx: (Math.random() - 0.5) * 0.3, vy: 0.12, vz: (Math.random() - 0.5) * 0.3, life: 0, max: 1.5, s: 0.28 });
+        }
+      }
+      for (const [id, e] of this.worksCache) if (!seen.has(id)) { G.free(this.gl, e.mesh); G.free(this.gl, e.scaf); this.worksCache.delete(id); }
+    }
+
+    /* ------------------------------------------------------------------
+       Hélicoptères de livraison
+       ------------------------------------------------------------------ */
+    heliParts(parts, glassParts, t) {
+      const g = this.game;
+      this.helis = [];
+      if (!g.s.deliveries.length) return;
+      if (!this.heliM) { const HM = G.heliMeshes(); this.heliM = {}; for (const k in HM) this.heliM[k] = G.upload(this.gl, HM[k]); }
+      const HM = this.heliM;
+      for (const dl of g.s.deliveries) {
+        const p = g.deliveryPose(dl);
+        if (!p) continue;
+        const ground = Math.max(this.world.heightAt(U.clamp(p.x, 0, W - 1), U.clamp(p.y, 0, H - 1)), G.WATER_Y);
+        const y = ground + 0.6 + p.alt * 8.5;
+        const S = 1.15;
+        const root = M4.create(); M4.translate(root, p.x, y, p.y); M4.rotY(root, -p.heading); M4.rotZ(root, -p.tilt); M4.scale(root, S, S, S);
+        parts.push([HM.body, root]); glassParts.push([HM.glass, root]);
+        const rot = M4.copy(root); M4.translate(rot, -0.05, 0.68, 0); M4.rotY(rot, t * 38); parts.push([HM.rotor, rot]);
+        const tr = M4.copy(root); M4.translate(tr, -1.5, 0.42, 0.04); M4.rotZ(tr, t * 55); parts.push([HM.tail, tr]);
+        // caisse au bout du câble
+        const hang = y - 0.05;
+        const target = this.world.heightAt(dl.x, dl.y);
+        const drop = p.cable * Math.max(0, hang - 0.5 - target);
+        if (p.crate) { const cm = M4.create(); M4.translate(cm, p.x, hang - 0.5 - drop, p.y); M4.rotY(cm, -p.heading + Math.sin(t * 1.3) * 0.08 * p.cable); parts.push([HM.crate, cm]); }
+        if (drop > 0.03) { const cb = M4.create(); M4.translate(cb, p.x, hang, p.y); M4.scale(cb, 1, drop, 1); parts.push([HM.cable, cb]); }
+        // souffle du rotor au ras du sol
+        if (y - ground < 5.5 && g.speed && Math.random() < 0.6) {
+          const a = Math.random() * TAU, r = 0.6 + Math.random() * 0.8;
+          this.addP({ k: 'dust', x: p.x + Math.cos(a) * r, y: ground + 0.05, z: p.y + Math.sin(a) * r, vx: Math.cos(a) * 1.4, vy: 0.08, vz: Math.sin(a) * 1.4, life: 0, max: 1.0, s: 0.3 });
+        }
+        this.helis.push({ id: dl.id, x: p.x, y, z: p.y, dl, phase: p.phase });
+      }
+    }
+
+    /* ------------------------------------------------------------------
+       Avatar du directeur ou de la directrice
+       ------------------------------------------------------------------ */
+    avatarParts(parts, t) {
+      const g = this.game, p = g.pl, pl = g.s.player;
+      this.avatarPos = null;
+      if (!p || !pl) return;
+      const key = pl.avatar + ':' + pl.gender;
+      if (!this.avM || this.avM.key !== key) {
+        if (this.avM) for (const k of ['body', 'leg', 'arm', 'hammer', 'kit', 'board']) G.free(this.gl, this.avM[k]);
+        const M = G.avatarMeshes(pl.avatar, pl.gender);
+        this.avM = { key, sh: M.sh };
+        for (const k of ['body', 'leg', 'arm', 'hammer', 'kit', 'board']) this.avM[k] = G.upload(this.gl, M[k]);
+      }
+      const A = this.avM, S = 1.35;
+      const walking = p.state === 'walk', act = p.state === 'work' && p.cur ? p.cur.act : null;
+      const run = walking && p.speed > 4.2;
+      const ph = p.phase;
+      const crouch = act === 'treat' || act === 'care' ? 1 : 0;
+      const gy = this.world.heightAt(p.x, p.y) + 0.02;
+      const bob = walking ? Math.abs(Math.sin(ph)) * (run ? 0.035 : 0.016) : Math.sin(t * 1.6) * 0.003;
+      const root = M4.create();
+      M4.translate(root, p.x, gy + bob - crouch * 0.05, p.y); M4.rotY(root, Math.atan2(p.dirX, p.dirY)); M4.scale(root, S, S, S);
+      if (run) M4.rotX(root, 0.14);
+      else if (crouch) M4.rotX(root, 0.25);
+      parts.push([A.body, root]);
+      const legAmp = walking ? (run ? 0.9 : 0.55) : 0;
+      for (const sd of [-1, 1]) { const lm = M4.copy(root); M4.translate(lm, sd * 0.026, 0.15, 0); M4.rotX(lm, Math.sin(ph) * legAmp * sd - crouch * 0.5); parts.push([A.leg, lm]); }
+      let armX = walking ? Math.sin(ph) * legAmp * 0.8 : Math.sin(t * 1.3) * 0.03, armZ = 0.14, tool = null;
+      if (act === 'build' || act === 'demolish') { const k = Math.pow(Math.max(0, Math.sin(p.anim * 7.5)), 0.6); armX = -2.3 + k * 1.3; tool = A.hammer; }
+      else if (act === 'treat') { armX = -1.15 + Math.sin(p.anim * 4) * 0.12; tool = A.kit; }
+      else if (act === 'care') { armX = -1.25 + Math.sin(p.anim * 5) * 0.2; }
+      else if (act === 'receive') { armX = -2.85; armZ = 0.45 + Math.sin(p.anim * 9) * 0.35; }
+      else if (!walking) { armX = -0.75; tool = A.board; }
+      const am = M4.copy(root); M4.translate(am, A.sh + 0.006, 0.272, 0); M4.rotZ(am, armZ); M4.rotX(am, armX);
+      parts.push([A.arm, am]);
+      if (tool) parts.push([tool, am]);
+      this.avatarPos = { x: p.x, y: gy, z: p.y, head: gy + 0.43 * S };
+      if (act === 'build' && g.speed && Math.random() < 0.08) this.addP({ k: 'spark', x: p.x + p.dirX * 0.35, y: gy + 0.25, z: p.y + p.dirY * 0.35, vx: (Math.random() - 0.5) * 0.4, vy: 0.6, vz: (Math.random() - 0.5) * 0.4, life: 0, max: 0.5, s: 0.08 });
     }
 
     drawTrees(prog, data, near) {
@@ -945,6 +1081,13 @@
           }
         }
       }
+      if (this.avatarPos) {
+        const a = this.avatarPos, m = M4.create();
+        M4.translate(m, a.x, a.y + 0.03, a.z); M4.rotY(m, -t * 0.6); M4.scale(m, 0.3, 1, 0.3);
+        gl.uniform3fv(lit.u.uTint, [1, 0.84, 0.4]); gl.uniform1f(lit.u.uTintAmt, 1); gl.uniform1f(lit.u.uAlpha, 0.55 + Math.sin(t * 3) * 0.2); gl.uniform1f(lit.u.uUnlit, 1);
+        this.drawMesh(lit, this.ringMesh, m);
+        gl.uniform1f(lit.u.uTintAmt, 0); gl.uniform1f(lit.u.uAlpha, 1); gl.uniform1f(lit.u.uUnlit, 0);
+      }
       const gh = this.ghost;
       if (gh) {
         if (gh.kind === 'tile') {
@@ -1005,6 +1148,46 @@
         }
         o.globalAlpha = 1;
       }
+      // chantiers : barre de progression
+      if (this.cam.dist < 70) {
+        for (const w of this.works || []) {
+          const sp = this.project(w.x, w.y, w.z);
+          if (!sp || sp.x < -60 || sp.y < -30 || sp.x > W2 + 60 || sp.y > H2 + 30) continue;
+          const bw = 64, label = w.b.upg ? `⬆ Niv. ${w.b.level + 1} · ${Math.round(w.p * 100)} %` : `🚧 ${Math.round(w.p * 100)} %`;
+          o.fillStyle = 'rgba(20,24,18,0.72)'; this.rrect(o, sp.x - bw / 2 - 6, sp.y - 22, bw + 12, 30, 8); o.fill();
+          o.fillStyle = 'rgba(255,255,255,0.15)'; this.rrect(o, sp.x - bw / 2, sp.y - 3, bw, 6, 3); o.fill();
+          o.fillStyle = '#e6bb5c'; this.rrect(o, sp.x - bw / 2, sp.y - 3, Math.max(4, bw * w.p), 6, 3); o.fill();
+          o.font = '600 11px "Trebuchet MS", sans-serif'; o.textAlign = 'center'; o.fillStyle = '#fff6e0';
+          o.fillText(label, sp.x, sp.y - 8);
+        }
+        // livraisons en préparation : compte à rebours au-dessus de l'enclos
+        for (const dl of g.s.deliveries) {
+          const ph = g.deliveryPhase(dl);
+          if (ph.phase !== 'prep' && ph.phase !== 'fly') continue;
+          const b = g.buildings[dl.enc];
+          if (!b) continue;
+          const sp = this.project(b.x + b.w / 2, this.world.buildingHeight(b) + 1.4, b.y + b.h / 2);
+          if (!sp) continue;
+          const mins = Math.max(1, Math.round(ph.left * 60));
+          const label = `🚁 ${DZ.SPECIES[dl.sp].short || DZ.SPECIES[dl.sp].name} · ${ph.phase === 'fly' ? 'en approche' : (mins >= 60 ? Math.floor(mins / 60) + ' h ' + String(mins % 60).padStart(2, '0') : mins + ' min')}`;
+          o.font = '600 11px "Trebuchet MS", sans-serif'; o.textAlign = 'center';
+          const tw = o.measureText(label).width + 16;
+          const yy = sp.y - (g.s.deliveries.indexOf(dl) % 3) * 22;
+          o.fillStyle = 'rgba(30,40,50,0.78)'; this.rrect(o, sp.x - tw / 2, yy - 14, tw, 20, 9); o.fill();
+          o.fillStyle = '#e8f3ff'; o.fillText(label, sp.x, yy);
+        }
+      }
+      // nom de l'avatar
+      if (this.avatarPos && this.cam.dist < 32) {
+        const a = this.avatarPos, sp = this.project(a.x, a.head + 0.12, a.z);
+        if (sp) {
+          const av = DZ.avatarOf(g.s.player), label = `${av.emoji} ${g.s.player.name}`;
+          o.font = '600 12px "Trebuchet MS", sans-serif'; o.textAlign = 'center';
+          const tw = o.measureText(label).width + 14;
+          o.fillStyle = 'rgba(230,187,92,0.92)'; this.rrect(o, sp.x - tw / 2, sp.y - 15, tw, 20, 10); o.fill();
+          o.fillStyle = '#2a1e10'; o.fillText(label, sp.x, sp.y);
+        }
+      }
       // icônes : malade, non relié
       for (const p of this.poses || []) {
         if (!p.d.sick) continue;
@@ -1051,6 +1234,28 @@
       const vg = o.createRadialGradient(W2 / 2, H2 / 2, Math.min(W2, H2) * 0.45, W2 / 2, H2 / 2, Math.max(W2, H2) * 0.75);
       vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(10,15,8,0.3)');
       o.fillStyle = vg; o.fillRect(0, 0, W2, H2);
+    }
+
+    rrect(o, x, y, w, h, r) { o.beginPath(); o.moveTo(x + r, y); o.arcTo(x + w, y, x + w, y + h, r); o.arcTo(x + w, y + h, x, y + h, r); o.arcTo(x, y + h, x, y, r); o.arcTo(x, y, x + w, y, r); o.closePath(); }
+
+    /* Vignette de l'avatar pour l'écran de choix. */
+    thumbAvatar(i, gender, w, h) {
+      const M = G.avatarMeshes(i, gender);
+      const meshes = ['body', 'arm', 'leg', 'board'].reduce((o, k) => { o[k] = G.upload(this.gl, M[k]); return o; }, {});
+      const c = this.renderThumb(w, h, (aspect) => {
+        const eye = [0.16, 0.3, 0.64];
+        const view = M4.lookAt(eye, [0, 0.215, 0], [0, 1, 0]);
+        const vp = M4.mul(M4.persp(0.62 / Math.min(1, aspect), aspect, 0.05, 10), view);
+        return { vp, eye, draw: (prog) => {
+          const root = M4.create(); M4.rotY(root, 0.55);
+          this.drawMesh(prog, meshes.body, root);
+          for (const sd of [-1, 1]) { const lm = M4.copy(root); M4.translate(lm, sd * 0.026, 0.15, 0); this.drawMesh(prog, meshes.leg, lm); }
+          const am = M4.copy(root); M4.translate(am, M.sh + 0.006, 0.272, 0); M4.rotZ(am, 0.14); M4.rotX(am, -0.75);
+          this.drawMesh(prog, meshes.arm, am); this.drawMesh(prog, meshes.board, am);
+        } };
+      });
+      for (const k in meshes) G.free(this.gl, meshes[k]);
+      return c;
     }
 
     /* ------------------------------------------------------------------

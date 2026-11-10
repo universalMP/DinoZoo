@@ -955,6 +955,53 @@ window.DZ = window.DZ || {};
     }
 
     /* ------------------------------------------------------------------
+       Hélicoptères de livraison : rotor placé dans l'espace, suivi à
+       chaque image ; il apparaît et s'éteint en fondu.
+       ------------------------------------------------------------------ */
+    heliSync(list) {
+      if (!this.ctx) return;
+      this.helis = this.helis || new Map();
+      const c = this.ctx, now = c.currentTime, seen = new Set();
+      for (const h of list) {
+        seen.add(h.id);
+        let v = this.helis.get(h.id);
+        if (!v) { v = this._heliVoice(); this.helis.set(h.id, v); }
+        const p = v.p;
+        if (p.positionX) { p.positionX.setTargetAtTime(h.x, now, 0.05); p.positionY.setTargetAtTime(h.y, now, 0.05); p.positionZ.setTargetAtTime(h.z, now, 0.05); } else p.setPosition(h.x, h.y, h.z);
+        const dist = Math.hypot(h.x - this.lis.x, h.y - this.lis.y, h.z - this.lis.z);
+        v.lp.frequency.setTargetAtTime(U.clamp(16000 / (1 + dist * 0.07), 600, 16000), now, 0.15);
+      }
+      for (const [id, v] of this.helis) if (!seen.has(id)) {
+        v.g.gain.cancelScheduledValues(now); v.g.gain.setValueAtTime(Math.max(0.0001, v.g.gain.value), now); v.g.gain.setTargetAtTime(0.0001, now, 0.5);
+        for (const n of v.srcs) n.stop(now + 2.5);
+        this.helis.delete(id);
+      }
+    }
+    _heliVoice() {
+      const c = this.ctx, now = c.currentTime;
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, now); g.gain.linearRampToValueAtTime(0.85, now + 2);
+      const lp = this._filter('lowpass', 8000, 0.5);
+      const p = c.createPanner(); p.panningModel = 'HRTF'; p.distanceModel = 'inverse'; p.refDistance = 9; p.rolloffFactor = 1; p.maxDistance = 600;
+      g.connect(lp); lp.connect(p); p.connect(this.sfxBus);
+      // battement des pales : impulsions à ~17 Hz qui modulent un souffle grave et un « thump »
+      const lfo = c.createOscillator(); lfo.frequency.value = rr(16, 18.5);
+      const pulse = c.createWaveShaper(), n = 256, curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; curve[i] = Math.pow(Math.max(0, x), 4); }
+      pulse.curve = curve; lfo.connect(pulse);
+      const am = c.createGain(); am.gain.value = 0.06; pulse.connect(am.gain);
+      const nz = this._src(this.brown, now), nb = this._filter('bandpass', 320, 0.8), ng = c.createGain(); ng.gain.value = 1.4;
+      nz.connect(nb); nb.connect(ng); ng.connect(am);
+      const th = c.createOscillator(); th.frequency.value = 38; const tg = c.createGain(); tg.gain.value = 0.5; th.connect(tg); tg.connect(am);
+      am.connect(g);
+      // sifflement de la turbine
+      const wh = c.createOscillator(); wh.type = 'sawtooth'; wh.frequency.value = rr(2100, 2400);
+      const wb = this._filter('bandpass', 2300, 9), wg = c.createGain(); wg.gain.value = 0.012;
+      wh.connect(wb); wb.connect(wg); wg.connect(g);
+      lfo.start(now); th.start(now); wh.start(now);
+      return { g, lp, p, srcs: [nz, lfo, th, wh] };
+    }
+
+    /* ------------------------------------------------------------------
        Analyse du lieu autour de la caméra (appelée ~3 fois par seconde)
        ------------------------------------------------------------------ */
     analyze(game, renderer) {
@@ -1075,6 +1122,20 @@ window.DZ = window.DZ || {};
           break;
         }
         case 'thunder': this.thunder(); break;
+        case 'hammer': { // un coup de maillet sur un chantier
+          if (!this._throttle('hammer', 110)) return;
+          const o = this.out(pos || null, { range: 45 });
+          if (!o) return;
+          const f = rr(280, 430);
+          for (const [r, a, d] of [[1, 1, 0.08], [2.57, 0.45, 0.045], [4.9, 0.2, 0.025]]) {
+            const s = this._osc('sine', f * r, t, d * 5), gg = c.createGain();
+            s.connect(gg); gg.connect(o.g); gg.gain.setValueAtTime(0.0001, t); gg.gain.linearRampToValueAtTime(0.22 * a, t + 0.0015); gg.gain.setTargetAtTime(0.0001, t + 0.003, d / 3);
+          }
+          const k = this._src(this.white, t, 0.03), kb = this._filter('bandpass', 2000, 1.5), kg = c.createGain();
+          k.connect(kb); kb.connect(kg); kg.connect(o.g); this._env(kg.gain, t, 0.001, 0.12, 0.002, 0.02);
+          o.g.gain.value = 0.45; setTimeout(o.end, 700);
+          break;
+        }
         case 'splash': {
           if (!this._throttle('splash', 350)) return;
           const o = this.out(pos || null, { range: 50 });
