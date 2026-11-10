@@ -2,12 +2,13 @@
    DinoZoo — Environnement sonore (Web Audio API, aucun fichier).
    - Mixage : bus musique / effets / ambiance / interface, réverbération
      de salle générée, compresseur final, volumes réglables.
-   - Son 3D : chaque source (dinosaure, pas, foule) est placée dans
-     l'espace (HRTF) par rapport à la caméra ; la distance atténue et
-     assourdit.
-   - Voix de dinosaures synthétisées par famille, pas lourds.
-   - Ambiances mixées selon le lieu : vent, feuillage, vagues, rivière,
-     pluie, tonnerre, oiseaux, cigales, grillons, grenouilles, foule.
+   - Son 3D : chaque source (dinosaure, foule, éclaboussure) est placée
+     dans l'espace (HRTF) par rapport à la caméra ; la distance atténue
+     et assourdit.
+   - Voix de dinosaures : modèle source-filtre (voix qui tremble, gorge,
+     souffle), assemblé différemment pour chaque famille.
+   - Ambiances mixées selon le lieu : vagues, rivière, pluie et vent
+     d'orage, tonnerre, oiseaux, cigales, grillons, grenouilles, foule.
    ===================================================================== */
 window.DZ = window.DZ || {};
 (function () {
@@ -40,6 +41,8 @@ window.DZ = window.DZ || {};
     plesiosaurus: { type: 'song', f0: 290 },
     mosasaurus: { type: 'deep', f0: 58 }
   };
+  /* Niveau de chaque type de voix (équilibré par rendu hors ligne). */
+  const G = { roar: 1, horn: 0.9, moan: 1, bellow: 0.6, raptor: 0.85, purr: 1, hoot: 0.8, chirp: 1, squeak: 1, screech: 1.6, song: 0.75, deep: 0.75 };
 
   class Sound {
     constructor() {
@@ -89,6 +92,7 @@ window.DZ = window.DZ || {};
       // bruits
       this.white = this._noise('white'); this.pink = this._noise('pink'); this.brown = this._noise('brown');
       this.applyVolumes();
+      this._mkWaves();
       this._beds();
       this._crowdInit();
       if (DZ.Music) { this.music = new DZ.Music(this); if (this.musicOn && !this.muted) this.music.start(); }
@@ -231,8 +235,23 @@ window.DZ = window.DZ || {};
     ready() { return !!this.ctx && !this.muted; }
 
     /* ------------------------------------------------------------------
-       Voix de dinosaures
+       Voix de dinosaures — modèle source-filtre
+       Une source vocale (onde glottale riche dont la hauteur tremble au
+       gré d'un bruit lent, sous-harmonique, souffle) traverse une gorge
+       (formants qui suivent l'ouverture de la gueule), puis un léger
+       grain de saturation. Chaque espèce assemble ces briques avec
+       inspiration, expiration, ébrouements, claquements ou bulles.
        ------------------------------------------------------------------ */
+    _mkWaves() {
+      const c = this.ctx;
+      const mk = (n, fn) => { const re = new Float32Array(n + 1), im = new Float32Array(n + 1); for (let k = 1; k <= n; k++) im[k] = fn(k); return c.createPeriodicWave(re, im); };
+      this.wv = {
+        glottal: mk(60, (k) => Math.pow(k, -1.15) * (1 + 0.25 * Math.sin(k * 1.7))), // voix riche
+        reed: mk(40, (k) => Math.pow(k, -0.8) * (k % 2 ? 1 : 0.55)), // nasal, cuivré
+        soft: mk(12, (k) => Math.pow(k, -2)) // doux, sifflé
+      };
+    }
+
     /* Cri d'un dinosaure : big = rugissement complet, sinon cri d'humeur. */
     dino(sp, pos, big) {
       if (!this.ready()) return;
@@ -258,212 +277,299 @@ window.DZ = window.DZ || {};
       }
     }
 
-    _roar(t, o, v, len, k) {
-      const c = this.ctx, dur = v.dur * len * rr(0.9, 1.1), f0 = v.f0 * rr(0.94, 1.06);
-      const mix = c.createGain();
-      // source tonale gutturale (glissement montant puis descendant + instabilité)
-      const s1 = this._osc('sawtooth', f0, t, dur + 0.3);
-      s1.frequency.setValueAtTime(f0 * 0.75, t);
-      s1.frequency.linearRampToValueAtTime(f0 * 1.18, t + dur * 0.28);
-      s1.frequency.linearRampToValueAtTime(f0 * 1.0, t + dur * 0.6);
-      s1.frequency.exponentialRampToValueAtTime(f0 * 0.62, t + dur);
-      const j1 = this._osc('sine', 6.3, t, dur + 0.3), j1g = c.createGain(); j1g.gain.value = f0 * 0.05; j1.connect(j1g); j1g.connect(s1.frequency);
-      const j2 = this._osc('sine', 2.1, t, dur + 0.3), j2g = c.createGain(); j2g.gain.value = f0 * 0.06; j2.connect(j2g); j2g.connect(s1.frequency);
-      const s1g = c.createGain(); s1g.gain.value = 0.55; s1.connect(s1g); s1g.connect(mix);
-      // sous-harmonique (infrabasse)
-      const sub = this._osc('square', f0 / 2, t, dur + 0.3);
-      sub.frequency.setValueAtTime(f0 * 0.38, t); sub.frequency.linearRampToValueAtTime(f0 * 0.58, t + dur * 0.3); sub.frequency.exponentialRampToValueAtTime(f0 * 0.3, t + dur);
-      const subLp = this._filter('lowpass', 180, 0.7), subG = c.createGain(); subG.gain.value = 0.55 * v.sub;
-      sub.connect(subLp); subLp.connect(subG); subG.connect(mix);
-      // râle (souffle dans la gorge)
-      const n = this._src(this.white, t, dur + 0.4), nb = this._filter('bandpass', 1100, 0.7), ng = c.createGain();
-      nb.frequency.setValueAtTime(700, t); nb.frequency.linearRampToValueAtTime(1500, t + dur * 0.3); nb.frequency.linearRampToValueAtTime(600, t + dur);
-      ng.gain.value = 0.9 * v.rasp; n.connect(nb); nb.connect(ng); ng.connect(mix);
-      if (v.gurgle) { const gq = this._osc('sine', 9, t, dur), gg = c.createGain(); gg.gain.value = 400; gq.connect(gg); gg.connect(nb.frequency); }
-      // grognement (trémolo)
-      const trem = c.createGain(); trem.gain.value = 0.7;
-      const tl = this._osc('sine', rr(19, 27), t, dur + 0.3), tlg = c.createGain(); tlg.gain.value = 0.32; tl.connect(tlg); tlg.connect(trem.gain);
-      mix.connect(trem);
-      // distorsion + formants de gueule
-      const sh = this._shaper(2.4);
-      const f1 = this._filter('peaking', 280, 1.2); f1.gain.value = 9;
-      const f2 = this._filter('peaking', 760, 1.6); f2.gain.value = 7;
-      const f3 = this._filter('peaking', 1900, 2); f3.gain.value = 4;
-      f2.frequency.setValueAtTime(600, t); f2.frequency.linearRampToValueAtTime(950, t + dur * 0.35); f2.frequency.linearRampToValueAtTime(650, t + dur);
-      const lp = this._filter('lowpass', v.bright, 0.6);
-      const env = c.createGain();
-      trem.connect(sh); sh.connect(f1); f1.connect(f2); f2.connect(f3); f3.connect(lp); lp.connect(env); env.connect(o.g);
-      this._env(env.gain, t, 0.16, 0.9 * k, dur * 0.55, dur * 0.45 + 0.3);
-      o.g.gain.value = 0.85;
-      // expiration finale
-      const b = this._src(this.brown, t + dur * 0.9, 0.9), bl = this._filter('lowpass', 500), bg = c.createGain();
-      b.connect(bl); bl.connect(bg); bg.connect(o.g); this._env(bg.gain, t + dur * 0.9, 0.08, 0.5 * k, 0.1, 0.6);
-      setTimeout(o.end, (dur + 1.4) * 1000);
-    }
-
-    _horn(t, o, v, k) {
-      const c = this.ctx, dur = rr(2.0, 2.8) * (k < 1 ? 0.7 : 1), f0 = v.f0 * rr(0.95, 1.05);
-      const s = this._osc('sawtooth', f0, t, dur + 0.6);
-      s.frequency.setValueAtTime(f0 * 0.92, t); s.frequency.linearRampToValueAtTime(f0 * 1.03, t + 0.4); s.frequency.setValueAtTime(f0 * 1.03, t + dur * 0.75); s.frequency.linearRampToValueAtTime(f0 * 0.9, t + dur);
-      const vib = this._osc('sine', 4.8, t, dur + 0.6), vg = c.createGain(); vg.gain.value = f0 * 0.012; vib.connect(vg); vg.connect(s.frequency);
-      // résonance de la crête creuse : filtre en peigne (retard + rétroaction)
-      const d = c.createDelay(0.05); d.delayTime.value = 1 / (f0 * 2.02);
-      const fb = c.createGain(); fb.gain.value = 0.72;
-      const inG = c.createGain(); inG.gain.value = 0.4;
-      s.connect(inG); inG.connect(d); d.connect(fb); fb.connect(d);
-      const bp = this._filter('bandpass', 380, 0.9), lp = this._filter('lowpass', 1600, 0.7), env = c.createGain();
-      d.connect(bp); inG.connect(bp); bp.connect(lp); lp.connect(env); env.connect(o.g);
-      this._env(env.gain, t, 0.35, 1.2 * k, dur * 0.6, dur * 0.4 + 0.4);
-      o.g.gain.value = 0.9;
-      setTimeout(o.end, (dur + 1.2) * 1000);
-    }
-
-    _moan(t, o, v, k) {
-      const c = this.ctx, dur = rr(3, 4) * (k < 1 ? 0.7 : 1), f0 = v.f0 * rr(0.92, 1.08);
-      const mix = c.createGain();
-      [[1, 0.8, 'sine'], [2, 0.45, 'sine'], [3, 0.2, 'triangle'], [4.02, 0.08, 'sine']].forEach(([h, a, type]) => {
-        const s = this._osc(type, f0 * h, t, dur + 0.5);
-        s.frequency.setValueAtTime(f0 * h * 0.85, t); s.frequency.linearRampToValueAtTime(f0 * h * 1.25, t + dur * 0.4); s.frequency.exponentialRampToValueAtTime(f0 * h * 0.8, t + dur);
-        const g = c.createGain(); g.gain.value = a; s.connect(g); g.connect(mix);
-      });
-      const n = this._src(this.brown, t, dur + 0.5), nl = this._filter('lowpass', 320), ng = c.createGain(); ng.gain.value = 0.35; n.connect(nl); nl.connect(ng); ng.connect(mix);
-      const lp = this._filter('lowpass', 700, 0.8), env = c.createGain();
-      mix.connect(lp); lp.connect(env); env.connect(o.g);
-      this._env(env.gain, t, 0.7, 1.0 * k, dur * 0.4, dur * 0.6);
-      o.g.gain.value = 1;
-      setTimeout(o.end, (dur + 1) * 1000);
-    }
-
-    _bellow(t, o, v, k) {
-      const c = this.ctx, dur = v.dur * rr(0.85, 1.2), f0 = v.f0 * rr(0.9, 1.1);
-      // ébrouement initial
-      const sn = this._src(this.white, t, 0.3), snb = this._filter('bandpass', 900, 1), sng = c.createGain();
-      sn.connect(snb); snb.connect(sng); sng.connect(o.g); this._env(sng.gain, t, 0.01, 0.6 * k, 0.05, 0.18);
-      // mugissement
-      const s = this._osc('sawtooth', f0, t + 0.15, dur + 0.3);
-      s.frequency.setValueAtTime(f0 * 1.1, t + 0.15); s.frequency.exponentialRampToValueAtTime(f0 * 0.75, t + 0.15 + dur);
-      const tr = this._osc('sine', 14, t + 0.15, dur), trg = c.createGain(); trg.gain.value = f0 * 0.04; tr.connect(trg); trg.connect(s.frequency);
-      const f1 = this._filter('bandpass', 480, 2), f2 = this._filter('bandpass', 950, 3), sum = c.createGain();
-      s.connect(f1); s.connect(f2); f1.connect(sum); f2.connect(sum);
-      const sh = this._shaper(1.6), env = c.createGain();
-      sum.connect(sh); sh.connect(env); env.connect(o.g);
-      this._env(env.gain, t + 0.15, 0.08, 1.4 * k, dur * 0.4, dur * 0.6);
-      o.g.gain.value = 0.9;
-      setTimeout(o.end, (dur + 1) * 1000);
-    }
-
-    _raptor(t, o, v, k, big) {
-      const c = this.ctx;
-      const n = big ? 1 : 2 + Math.floor(R() * 3);
-      for (let i = 0; i < n; i++) {
-        const st = t + i * rr(0.18, 0.28);
-        const long = big && i === 0;
-        const dur = long ? 0.8 : rr(0.12, 0.2), f = v.f0 * rr(0.85, 1.25) * (long ? 1.5 : 1);
-        const s = this._osc('sawtooth', f, st, dur + 0.05);
-        s.frequency.setValueAtTime(f * (long ? 1 : 1.25), st); s.frequency.exponentialRampToValueAtTime(f * (long ? 0.7 : 0.75), st + dur);
-        const m = this._osc('sine', f * 1.48, st, dur + 0.05), mg = c.createGain(); mg.gain.value = f * (long ? 0.8 : 0.5); m.connect(mg); mg.connect(s.frequency);
-        if (long) { const vib = this._osc('sine', 13, st, dur), vg = c.createGain(); vg.gain.value = f * 0.06; vib.connect(vg); vg.connect(s.frequency); }
-        const bp = this._filter('bandpass', 1700, 1.4), env = c.createGain();
-        s.connect(bp); bp.connect(env); env.connect(o.g);
-        this._env(env.gain, st, 0.012, 0.9 * k, dur * 0.3, dur * 0.7);
-        const h = this._src(this.white, st, dur + 0.05), hp = this._filter('highpass', 3200), hg = c.createGain();
-        h.connect(hp); hp.connect(hg); hg.connect(o.g); this._env(hg.gain, st, 0.01, 0.18 * k, dur * 0.3, dur * 0.6);
+    /* Une émission vocale. Renvoie l'instant où la voix se tait. */
+    _voice(t, out, p) {
+      const c = this.ctx, dur = p.dur, rel = p.rel || 0.4, end = t + dur + rel + 0.3, f0 = p.f0;
+      const src = c.createGain();
+      // hauteur instable : bruit grave filtré qui fait trembler la voix
+      const jit = this._src(this.brown, t, end - t), jl = this._filter('lowpass', p.jitRate || 14, 0.5), jg = c.createGain();
+      jg.gain.value = (p.jit === undefined ? 60 : p.jit) * 5; // bruit brun : écart type ≈ 0,18
+      jit.connect(jl); jl.connect(jg);
+      const cont = p.contour || [[0, 1], [1, 1]];
+      const tone = (wave, mult, gain) => {
+        const o = c.createOscillator(); o.setPeriodicWave(wave);
+        o.frequency.setValueAtTime(f0 * mult * cont[0][1], t);
+        for (let i = 1; i < cont.length; i++) o.frequency.linearRampToValueAtTime(f0 * mult * cont[i][1], t + dur * cont[i][0]);
+        jg.connect(o.detune);
+        if (p.vib) {
+          const l = this._osc('sine', p.vib[0], t, end - t), lg = c.createGain();
+          lg.gain.setValueAtTime(0, t); lg.gain.linearRampToValueAtTime(p.vib[1], t + Math.min(0.4, dur * 0.5));
+          l.connect(lg); lg.connect(o.detune);
+        }
+        const g = c.createGain(); g.gain.value = gain; o.connect(g); g.connect(src);
+        o.start(t); o.stop(end);
+      };
+      tone(this.wv[p.wave || 'glottal'], 1, p.tone === undefined ? 1 : p.tone);
+      if (p.sub) tone(this.wv.glottal, 0.5, p.sub);
+      if (p.noise) {
+        const n = this._src(p.noiseBuf || this.pink, t, end - t), ng = c.createGain(); ng.gain.value = p.noise;
+        n.connect(ng); ng.connect(src);
       }
-      o.g.gain.value = 0.7;
-      setTimeout(o.end, 1600);
+      // grain rugueux : modulation d'amplitude irrégulière (râle, grognement)
+      let node = src;
+      if (p.rough) {
+        const am = c.createGain(); am.gain.value = 1 - p.rough[1];
+        const l = c.createOscillator(); l.type = 'triangle'; l.frequency.value = p.rough[0];
+        const lj = c.createGain(); lj.gain.value = 600; jl.connect(lj); lj.connect(l.detune);
+        const lg = c.createGain(); lg.gain.value = p.rough[1]; l.connect(lg); lg.connect(am.gain);
+        l.start(t); l.stop(end);
+        src.connect(am); node = am;
+      }
+      // gorge : formants en parallèle qui suivent l'ouverture de la gueule
+      const throat = c.createGain();
+      const mouth = p.mouth || [[0, 1], [1, 1]];
+      for (const [f, q, a] of p.formants) {
+        const bp = this._filter('bandpass', f, q), g = c.createGain(); g.gain.value = a;
+        bp.frequency.setValueAtTime(f * mouth[0][1], t);
+        for (let i = 1; i < mouth.length; i++) bp.frequency.linearRampToValueAtTime(f * mouth[i][1], t + dur * mouth[i][0]);
+        node.connect(bp); bp.connect(g); g.connect(throat);
+      }
+      let last = throat;
+      if (p.drive) { const sh = this._shaper(p.drive); last.connect(sh); last = sh; }
+      const lp = this._filter('lowpass', p.lp || 6000, 0.5); last.connect(lp);
+      const env = c.createGain(); lp.connect(env); env.connect(out);
+      const a = p.att || 0.08, lvl = (p.level || 1) * (p.gain || 1);
+      env.gain.setValueAtTime(0.0001, t);
+      env.gain.linearRampToValueAtTime(lvl, t + a);
+      env.gain.linearRampToValueAtTime(lvl * (p.sustain || 0.8), t + Math.max(a + 0.01, dur));
+      env.gain.setTargetAtTime(0.0001, t + Math.max(a + 0.01, dur), rel / 3);
+      return t + dur;
     }
 
+    _breath(t, out, dur, lvl, inhale) {
+      const c = this.ctx, n = this._src(this.pink, t, dur + 0.4), bp = this._filter('bandpass', 700, 1.1), g = c.createGain();
+      if (inhale) { bp.frequency.setValueAtTime(450, t); bp.frequency.exponentialRampToValueAtTime(1300, t + dur); }
+      else { bp.frequency.setValueAtTime(1000, t); bp.frequency.exponentialRampToValueAtTime(320, t + dur); }
+      n.connect(bp); bp.connect(g); g.connect(out);
+      g.gain.setValueAtTime(0.0001, t);
+      if (inhale) { g.gain.linearRampToValueAtTime(lvl, t + dur * 0.85); g.gain.linearRampToValueAtTime(0.0001, t + dur); }
+      else { g.gain.linearRampToValueAtTime(lvl, t + 0.06); g.gain.setTargetAtTime(0.0001, t + 0.1, dur / 3); }
+    }
+    _thump(t, out, f, dur, lvl) { // résonance de la poitrine
+      const c = this.ctx, o = c.createOscillator(); o.setPeriodicWave(this.wv.soft);
+      o.frequency.setValueAtTime(f * 0.8, t); o.frequency.linearRampToValueAtTime(f * 1.1, t + dur * 0.3); o.frequency.exponentialRampToValueAtTime(f * 0.6, t + dur);
+      const lp = this._filter('lowpass', 150, 0.7), g = c.createGain();
+      o.connect(lp); lp.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.8);
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(lvl, t + 0.2); g.gain.setTargetAtTime(0.0001, t + dur * 0.7, 0.2);
+    }
+    _gurgle(t, out, dur, lvl) {
+      const c = this.ctx, n = this._src(this.brown, t, dur), bp = this._filter('bandpass', 320, 5), g = c.createGain();
+      const m = this._src(this.brown, t, dur), ml = this._filter('lowpass', 9), mg = c.createGain(); mg.gain.value = 900;
+      m.connect(ml); ml.connect(mg); mg.connect(bp.frequency);
+      n.connect(bp); bp.connect(g); g.connect(out);
+      this._env(g.gain, t, 0.2, lvl, dur * 0.5, dur * 0.3);
+    }
+    _snort(t, out, lvl) { // ébrouement : deux souffles nasaux
+      const c = this.ctx;
+      for (let i = 0; i < 2; i++) {
+        const st = t + i * rr(0.12, 0.18), n = this._src(this.white, st, 0.25), bp = this._filter('bandpass', rr(900, 1500), 1.3), lp = this._filter('lowpass', 3000), g = c.createGain();
+        n.connect(bp); bp.connect(lp); lp.connect(g); g.connect(out);
+        this._env(g.gain, st, 0.008, lvl * (i ? 0.6 : 1), 0.03, 0.12);
+      }
+    }
+    _bubbles(t, out, n, lo, hi, lvl, span) { // bulles : petite sinusoïde qui monte en s'éteignant
+      const c = this.ctx;
+      for (let i = 0; i < n; i++) {
+        const st = t + R() * span, f = rr(lo, hi), o = this._osc('sine', f, st, 0.1), g = c.createGain();
+        o.frequency.setValueAtTime(f, st); o.frequency.exponentialRampToValueAtTime(f * rr(1.5, 2.2), st + 0.05);
+        o.connect(g); g.connect(out);
+        g.gain.setValueAtTime(0.0001, st); g.gain.linearRampToValueAtTime(lvl * rr(0.4, 1), st + 0.003); g.gain.setTargetAtTime(0.0001, st + 0.005, 0.018);
+      }
+    }
+    _clicks(t, out, n, lvl) { // claquements de bec ou de mâchoire
+      const c = this.ctx;
+      for (let i = 0; i < n; i++) {
+        const st = t + i * rr(0.05, 0.09), s = c.createBufferSource(); s.buffer = this.white; s.start(st, R() * 3, 0.012);
+        const bp = this._filter('bandpass', rr(2200, 3800), 3), g = c.createGain(); g.gain.value = lvl;
+        s.connect(bp); bp.connect(g); g.connect(out);
+      }
+    }
+    _done(o, end) { setTimeout(o.end, Math.max(0.5, end - this.ctx.currentTime + 1.2) * 1000); }
+
+    /* Grands théropodes : inspiration, rugissement guttural, expiration. */
+    _roar(t, o, v, len, k) {
+      const dur = v.dur * len * rr(0.88, 1.12), f0 = v.f0 * rr(0.93, 1.07);
+      let t0 = t;
+      if (k >= 1) { this._breath(t, o.g, 0.42, 0.12, true); t0 = t + 0.4; }
+      const end = this._voice(t0, o.g, {
+        f0, dur, tone: 0.8, sub: 0.75 * v.sub, noise: 0.8 * v.rasp, jit: 70, jitRate: 16,
+        contour: [[0, 0.72], [0.22, 1.15], [0.55, 1.02], [1, 0.6]],
+        rough: [rr(24, 34), 0.3 + v.rasp * 0.15],
+        formants: [[170, 1.4, 1.1], [430, 2.2, 1.4], [920, 3, 1.1], [1750, 4, 0.5], [2900, 5, 0.22]],
+        mouth: [[0, 0.7], [0.25, 1.25], [0.6, 1.05], [1, 0.75]],
+        drive: 2.2, lp: v.bright, att: 0.18, sustain: 0.6, rel: dur * 0.35 + 0.3, level: k, gain: G.roar
+      });
+      if (v.gurgle) this._gurgle(t0, o.g, dur, 0.15 * k);
+      this._thump(t0, o.g, f0 * 0.5, dur * 0.8, 0.25 * v.sub * k);
+      this._breath(t0 + dur * 0.95, o.g, 0.9, 0.12 * k, false);
+      o.g.gain.value = 0.85;
+      this._done(o, end + dur * 0.35 + 1);
+    }
+
+    /* Parasaurolophus : appel de trompe dans une crête creuse (modes d'un tube fermé). */
+    _horn(t, o, v, k) {
+      const dur = rr(2.0, 2.8) * (k < 1 ? 0.65 : 1), f0 = v.f0 * rr(0.95, 1.05);
+      const end = this._voice(t, o.g, {
+        f0, dur, wave: 'reed', jit: 18, jitRate: 6, vib: [4.6, 14], noise: 0.12,
+        contour: [[0, 0.9], [0.15, 1.02], [0.8, 1.0], [1, 0.88]],
+        formants: [[f0 * 3, 4, 1], [f0 * 5, 5, 0.75], [f0 * 7, 6, 0.4], [f0 * 11, 6, 0.15]],
+        drive: 1.3, lp: 2200, att: 0.35, sustain: 0.85, rel: 0.6, level: k, gain: G.horn
+      });
+      this._breath(t, o.g, 0.3, 0.03 * k, false);
+      o.g.gain.value = 0.9; this._done(o, end + 0.6);
+    }
+
+    /* Sauropodes : longue plainte grave, presque un chant de baleine. */
+    _moan(t, o, v, k) {
+      const dur = rr(3, 4.2) * (k < 1 ? 0.65 : 1), f0 = v.f0 * rr(0.92, 1.08);
+      const end = this._voice(t, o.g, {
+        f0, dur, sub: 0.45, noise: 0.25, noiseBuf: this.brown, jit: 35, jitRate: 4, vib: [3.2, 10],
+        contour: [[0, 0.85], [0.4, 1.25], [0.75, 1.1], [1, 0.8]],
+        rough: [rr(10, 14), 0.15],
+        formants: [[130, 1.5, 1.2], [310, 2.5, 1], [640, 3, 0.45], [1200, 4, 0.15]],
+        mouth: [[0, 0.85], [0.4, 1.15], [1, 0.9]],
+        lp: 1100, att: 0.7, sustain: 0.7, rel: dur * 0.4, level: k, gain: G.moan
+      });
+      this._thump(t, o.g, f0 * 0.5, dur, 0.2 * k);
+      o.g.gain.value = 1; this._done(o, end + dur * 0.4);
+    }
+
+    /* Herbivores trapus : ébrouement puis mugissement. */
+    _bellow(t, o, v, k) {
+      const dur = v.dur * rr(0.85, 1.2), f0 = v.f0 * rr(0.9, 1.1);
+      this._snort(t, o.g, 0.18 * k);
+      const end = this._voice(t + 0.28, o.g, {
+        f0, dur, sub: 0.4, noise: 0.35, jit: 45, jitRate: 10,
+        contour: [[0, 1.08], [0.3, 1.0], [1, 0.74]],
+        rough: [rr(14, 22), 0.28],
+        formants: [[260, 2, 1.2], [540, 3, 1.1], [1150, 4, 0.5], [2400, 5, 0.18]],
+        mouth: [[0, 0.85], [0.3, 1.1], [1, 0.8]],
+        drive: 1.6, lp: 2600, att: 0.06, sustain: 0.7, rel: dur * 0.5, level: k, gain: G.bellow
+      });
+      o.g.gain.value = 0.9; this._done(o, end + dur * 0.5);
+    }
+
+    /* Vélociraptor : cri strident (alerte) ou ronronnement crépitant + aboiements. */
+    _raptor(t, o, v, k, big) {
+      let end = t;
+      if (big) {
+        this._breath(t, o.g, 0.18, 0.08, true);
+        end = this._voice(t + 0.18, o.g, {
+          f0: v.f0 * rr(0.55, 0.65), dur: rr(0.7, 0.9), wave: 'reed', noise: 0.6, noiseBuf: this.white, jit: 90, jitRate: 24,
+          contour: [[0, 0.9], [0.2, 1.35], [0.6, 1.2], [1, 0.75]],
+          rough: [rr(45, 60), 0.4],
+          formants: [[850, 3, 1], [1800, 4, 1], [3100, 5, 0.5], [4500, 6, 0.2]],
+          mouth: [[0, 0.8], [0.2, 1.15], [1, 0.85]],
+          drive: 2.6, lp: 7000, att: 0.03, sustain: 0.6, rel: 0.25, level: k, gain: G.raptor
+        });
+      } else {
+        this._voice(t, o.g, {
+          f0: rr(85, 110), dur: rr(0.4, 0.6), sub: 0.3, noise: 0.3, jit: 40, rough: [rr(26, 34), 0.85],
+          formants: [[320, 2, 1], [850, 3, 0.7], [1900, 4, 0.25]], lp: 3000, att: 0.05, sustain: 0.8, rel: 0.15, level: 0.55 * k, gain: G.purr
+        });
+        const n = 1 + Math.floor(R() * 3);
+        for (let i = 0; i < n; i++) {
+          const st = t + 0.55 + i * rr(0.22, 0.32);
+          end = this._voice(st, o.g, {
+            f0: v.f0 * rr(0.5, 0.7), dur: rr(0.1, 0.18), wave: 'reed', noise: 0.5, noiseBuf: this.white, jit: 60, jitRate: 30,
+            contour: [[0, 1.25], [0.3, 1.15], [1, 0.8]], rough: [rr(45, 65), 0.45],
+            formants: [[900, 3, 1], [1900, 4, 0.9], [3200, 5, 0.4]], drive: 2.4, lp: 6500, att: 0.008, sustain: 0.7, rel: 0.08, level: 0.8 * k, gain: G.raptor
+          });
+        }
+        if (R() < 0.5) this._clicks(t + 0.3, o.g, 3, 0.4 * k);
+      }
+      o.g.gain.value = 0.7; this._done(o, end + 0.4);
+    }
+
+    /* Dilophosaure : hululements chevrotants puis crépitement sifflant. */
     _hoot(t, o, v, k) {
       const c = this.ctx;
-      for (let i = 0; i < 2; i++) {
-        const st = t + i * 0.55, dur = 0.45, f = v.f0 * rr(0.9, 1.1) * (i ? 0.85 : 1);
-        const s = this._osc('sine', f, st, dur + 0.1);
-        s.frequency.setValueAtTime(f * 0.9, st); s.frequency.linearRampToValueAtTime(f * 1.1, st + dur * 0.5); s.frequency.linearRampToValueAtTime(f * 0.85, st + dur);
-        const am = c.createGain(); am.gain.value = 0.6;
-        const rt = this._osc('square', 36, st, dur), rtg = c.createGain(); rtg.gain.value = 0.4; rt.connect(rtg); rtg.connect(am.gain);
-        const env = c.createGain();
-        s.connect(am); am.connect(env); env.connect(o.g);
-        this._env(env.gain, st, 0.04, 0.8 * k, dur * 0.4, dur * 0.5);
+      let end = t;
+      const n = 2 + (R() < 0.4 ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const st = t + i * 0.5, f = v.f0 * rr(0.9, 1.1) * (i ? 0.86 : 1);
+        end = this._voice(st, o.g, {
+          f0: f, dur: 0.38, wave: 'soft', noise: 0.04, jit: 20, vib: [7, 35],
+          contour: [[0, 0.9], [0.5, 1.08], [1, 0.84]], rough: [36, 0.25],
+          formants: [[f, 2, 1], [f * 2, 3, 0.35]], lp: 3000, att: 0.04, sustain: 0.7, rel: 0.18, level: 0.8 * k, gain: G.hoot
+        });
       }
-      const h = this._src(this.white, t + 1.1, 0.8), hp = this._filter('highpass', 2500), hg = c.createGain();
-      h.connect(hp); hp.connect(hg); hg.connect(o.g); this._env(hg.gain, t + 1.1, 0.05, 0.3 * k, 0.3, 0.4);
-      o.g.gain.value = 0.6;
-      setTimeout(o.end, 2200);
+      const st = end + 0.15;
+      const h = this._src(this.white, st, 0.9), hp = this._filter('highpass', 2500), am = c.createGain(); am.gain.value = 0.5;
+      const l = this._osc('triangle', 32, st, 0.9), lg = c.createGain(); lg.gain.value = 0.5; l.connect(lg); lg.connect(am.gain);
+      const hg = c.createGain(); h.connect(hp); hp.connect(am); am.connect(hg); hg.connect(o.g); this._env(hg.gain, st, 0.05, 0.2 * k, 0.3, 0.35);
+      o.g.gain.value = 0.6; this._done(o, st + 0.9);
     }
 
+    /* Compsognathus : pépiements rapides. */
     _chirp(t, o, v, k) {
       const c = this.ctx, n = 3 + Math.floor(R() * 4);
+      let st = t;
       for (let i = 0; i < n; i++) {
-        const st = t + i * rr(0.07, 0.11), f = v.f0 * rr(0.85, 1.2);
-        const s = this._osc('sine', f, st, 0.08);
-        s.frequency.setValueAtTime(f, st); s.frequency.exponentialRampToValueAtTime(f * 1.45, st + 0.05);
-        const env = c.createGain(); s.connect(env); env.connect(o.g);
-        this._env(env.gain, st, 0.005, 0.45 * k, 0.02, 0.045);
+        const f = v.f0 * rr(0.85, 1.2), d = rr(0.04, 0.08);
+        const s = c.createOscillator(); s.setPeriodicWave(this.wv.soft);
+        s.frequency.setValueAtTime(f * 0.9, st); s.frequency.exponentialRampToValueAtTime(f * rr(1.3, 1.6), st + d);
+        const g = c.createGain(); s.connect(g); g.connect(o.g); s.start(st); s.stop(st + d + 0.08);
+        g.gain.setValueAtTime(0.0001, st); g.gain.linearRampToValueAtTime(0.4 * k * G.chirp, st + 0.006); g.gain.setTargetAtTime(0.0001, st + d * 0.6, 0.015);
+        st += d + rr(0.03, 0.07);
       }
-      o.g.gain.value = 0.7;
-      setTimeout(o.end, 1000);
+      o.g.gain.value = 0.6; this._done(o, st);
     }
 
+    /* Petits ornithopodes : couinements nasillards. */
     _squeak(t, o, v, k) {
-      const c = this.ctx;
-      for (let i = 0; i < 2; i++) {
-        const st = t + i * 0.3, f = v.f0 * rr(0.9, 1.15), dur = 0.22;
-        const s = this._osc('square', f, st, dur + 0.05);
-        s.frequency.setValueAtTime(f * 1.15, st); s.frequency.exponentialRampToValueAtTime(f * 0.8, st + dur);
-        const bp = this._filter('bandpass', 1500, 2.5), env = c.createGain();
-        s.connect(bp); bp.connect(env); env.connect(o.g);
-        this._env(env.gain, st, 0.015, 0.7 * k, dur * 0.3, dur * 0.6);
-      }
-      o.g.gain.value = 0.6;
-      setTimeout(o.end, 1100);
-    }
-
-    _screech(t, o, v, k) {
-      const c = this.ctx, n = 1 + Math.floor(R() * 2);
+      let end = t;
+      const n = 2 + (R() < 0.3 ? 1 : 0);
       for (let i = 0; i < n; i++) {
-        const st = t + i * 0.7, dur = rr(0.45, 0.7), f = v.f0 * rr(0.9, 1.1);
-        const s = this._osc('sawtooth', f, st, dur + 0.05);
-        s.frequency.setValueAtTime(f * 0.9, st); s.frequency.linearRampToValueAtTime(f * 1.2, st + dur * 0.3); s.frequency.exponentialRampToValueAtTime(f * 0.7, st + dur);
-        const vib = this._osc('sine', 16, st, dur), vg = c.createGain(); vg.gain.value = f * 0.05; vib.connect(vg); vg.connect(s.frequency);
-        const nz = this._src(this.white, st, dur), nb = this._filter('bandpass', 2600, 1.2), ngn = c.createGain(); ngn.gain.value = 0.5;
-        nz.connect(nb); nb.connect(ngn);
-        const bp = this._filter('bandpass', 2000, 1.1), sum = c.createGain(), sh = this._shaper(2), env = c.createGain();
-        s.connect(bp); bp.connect(sum); ngn.connect(sum); sum.connect(sh); sh.connect(env); env.connect(o.g);
-        this._env(env.gain, st, 0.03, 0.7 * k, dur * 0.4, dur * 0.5);
+        const st = t + i * rr(0.25, 0.35), f = v.f0 * rr(0.5, 0.62);
+        end = this._voice(st, o.g, {
+          f0: f, dur: rr(0.14, 0.22), wave: 'reed', noise: 0.15, noiseBuf: this.white, jit: 40, jitRate: 20,
+          contour: [[0, 1.15], [0.35, 1.28], [1, 0.82]],
+          formants: [[1000, 3, 1], [2200, 4, 0.6], [3500, 5, 0.2]], drive: 1.3, lp: 6000, att: 0.012, sustain: 0.7, rel: 0.07, level: 0.7 * k, gain: G.squeak
+        });
       }
-      o.g.gain.value = 0.55;
-      setTimeout(o.end, 2000);
+      o.g.gain.value = 0.6; this._done(o, end + 0.2);
     }
 
+    /* Ptérosaures : cri rauque et perçant, comme un héron. */
+    _screech(t, o, v, k) {
+      let end = t;
+      const n = 1 + Math.floor(R() * 2);
+      for (let i = 0; i < n; i++) {
+        const st = t + i * 0.7, d = rr(0.45, 0.7), f = v.f0 * rr(0.45, 0.55);
+        end = this._voice(st, o.g, {
+          f0: f, dur: d, wave: 'reed', noise: 0.6, noiseBuf: this.white, jit: 80, jitRate: 22,
+          contour: [[0, 0.9], [0.3, 1.2], [1, 0.7]], rough: [rr(55, 80), 0.45],
+          formants: [[1200, 3, 1], [2400, 4, 0.9], [3700, 5, 0.4]],
+          mouth: [[0, 0.85], [0.3, 1.1], [1, 0.9]], drive: 2.4, lp: 7500, att: 0.03, sustain: 0.6, rel: 0.15, level: 0.75 * k, gain: G.screech
+        });
+      }
+      o.g.gain.value = 0.55; this._done(o, end + 0.3);
+    }
+
+    /* Plésiosaure : chant glissé et bulles. */
     _song(t, o, v, k) {
-      const c = this.ctx, dur = rr(1.6, 2.4), f = v.f0 * rr(0.9, 1.1);
-      const s = this._osc('sine', f, t, dur + 0.3);
-      s.frequency.setValueAtTime(f, t); s.frequency.linearRampToValueAtTime(f * 1.45, t + dur * 0.45); s.frequency.exponentialRampToValueAtTime(f * 1.05, t + dur);
-      const vib = this._osc('sine', 5.5, t, dur + 0.3), vg = c.createGain(); vg.gain.value = f * 0.02; vib.connect(vg); vg.connect(s.frequency);
-      const s2 = this._osc('sine', f * 2.01, t, dur + 0.3), g2 = c.createGain(); g2.gain.value = 0.25; s2.connect(g2);
-      const lp = this._filter('lowpass', 1400), env = c.createGain();
-      s.connect(lp); g2.connect(lp); lp.connect(env); env.connect(o.g);
-      this._env(env.gain, t, 0.25, 0.7 * k, dur * 0.5, dur * 0.5);
-      o.g.gain.value = 0.8;
-      setTimeout(o.end, (dur + 1) * 1000);
+      const dur = rr(1.6, 2.4), f = v.f0 * rr(0.9, 1.1);
+      const end = this._voice(t, o.g, {
+        f0: f, dur, wave: 'soft', noise: 0.03, jit: 25, jitRate: 3, vib: [5.5, 18],
+        contour: [[0, 1], [0.45, 1.45], [0.8, 1.2], [1, 1.02]],
+        formants: [[f * 1.1, 1.2, 1], [f * 2.3, 1.8, 0.4]],
+        mouth: [[0, 0.9], [0.45, 1.3], [1, 1]], lp: 1600, att: 0.25, sustain: 0.75, rel: 0.6, level: 0.8 * k, gain: G.song
+      });
+      this._bubbles(t + 0.2, o.g, 4, 300, 700, 0.05 * k, dur);
+      o.g.gain.value = 0.8; this._done(o, end + 0.6);
     }
 
+    /* Mosasaure : grondement sous l'eau et chapelet de bulles. */
     _deep(t, o, v, k) {
-      const c = this.ctx, dur = rr(1.6, 2.2), f = v.f0 * rr(0.9, 1.1);
-      const s = this._osc('sawtooth', f, t, dur + 0.3);
-      s.frequency.setValueAtTime(f * 0.9, t); s.frequency.linearRampToValueAtTime(f * 1.1, t + dur * 0.4); s.frequency.exponentialRampToValueAtTime(f * 0.7, t + dur);
-      const trem = c.createGain(); trem.gain.value = 0.6;
-      const tl = this._osc('sine', 17, t, dur + 0.3), tg = c.createGain(); tg.gain.value = 0.35; tl.connect(tg); tg.connect(trem.gain);
-      s.connect(trem);
-      // bulles sous l'eau
-      const b = this._src(this.white, t, dur), bb = this._filter('bandpass', 400, 4), bg = c.createGain(); bg.gain.value = 0.5;
-      const bm = this._osc('sine', 7, t, dur), bmg = c.createGain(); bmg.gain.value = 300; bm.connect(bmg); bmg.connect(bb.frequency);
-      b.connect(bb); bb.connect(bg);
-      const lp = this._filter('lowpass', 420, 1), env = c.createGain();
-      trem.connect(lp); bg.connect(lp); lp.connect(env); env.connect(o.g);
-      this._env(env.gain, t, 0.2, 1.1 * k, dur * 0.4, dur * 0.6);
-      o.g.gain.value = 1;
-      setTimeout(o.end, (dur + 1) * 1000);
+      const dur = rr(1.6, 2.2), f = v.f0 * rr(0.9, 1.1);
+      const end = this._voice(t, o.g, {
+        f0: f, dur, sub: 0.6, noise: 0.3, noiseBuf: this.brown, jit: 50, jitRate: 8,
+        contour: [[0, 0.9], [0.4, 1.1], [1, 0.7]], rough: [rr(15, 19), 0.4],
+        formants: [[150, 1.5, 1.2], [380, 2.5, 1], [800, 3, 0.4]], drive: 1.8, lp: 650, att: 0.2, sustain: 0.65, rel: 0.6, level: k, gain: G.deep
+      });
+      this._bubbles(t, o.g, 10, 180, 600, 0.08 * k, dur + 0.5);
+      o.g.gain.value = 1; this._done(o, end + 0.8);
     }
 
     /* ------------------------------------------------------------------
@@ -516,46 +622,66 @@ window.DZ = window.DZ || {};
     }
 
     /* ------------------------------------------------------------------
-       Foule de visiteurs : brouhaha de voix synthétiques
+       Foule de visiteurs : murmure de fond + quelques voix proches
+       (source glottale qui tremble, souffle, trois formants).
        ------------------------------------------------------------------ */
     _crowdInit() {
-      const c = this.ctx;
+      const c = this.ctx, now = c.currentTime;
       this.crowdOut = c.createGain(); this.crowdOut.gain.value = 0;
-      const lp = this._filter('lowpass', 3200, 0.5);
-      this.crowdOut.connect(lp); lp.connect(this.ambBus);
+      const hp = this._filter('highpass', 110), lp = this._filter('lowpass', 3600, 0.5);
+      this.crowdOut.connect(hp); hp.connect(lp); lp.connect(this.ambBus);
+      // murmure : des dizaines de voix lointaines confondues
+      this.murmur = c.createGain(); this.murmur.gain.value = 0;
+      const mam = c.createGain(); mam.gain.value = 0.65;
+      const ml = this._src(this.brown, now), mll = this._filter('lowpass', 5), mlg = c.createGain(); mlg.gain.value = 0.9;
+      ml.connect(mll); mll.connect(mlg); mlg.connect(mam.gain);
+      const mn = this._src(this.pink, now);
+      for (const [f, q, a] of [[480, 1.4, 1], [1050, 1.8, 0.55], [2500, 2.5, 0.2]]) {
+        const bp = this._filter('bandpass', f, q), g = c.createGain(); g.gain.value = a;
+        mn.connect(bp); bp.connect(g); g.connect(mam);
+      }
+      mam.connect(this.murmur); this.murmur.connect(this.crowdOut);
+      // voix proches
+      const jit = [0, 1].map(() => { const s = this._src(this.brown, now), l = this._filter('lowpass', 7), g = c.createGain(); g.gain.value = 140; s.connect(l); l.connect(g); return g; });
+      const breath = this._src(this.pink, now);
       this.voices = [];
       const kinds = ['m', 'm', 'f', 'f', 'f', 'c', 'm', 'c'];
       for (let i = 0; i < kinds.length; i++) {
-        const o = c.createOscillator(); o.type = 'sawtooth';
+        const o = c.createOscillator(); o.setPeriodicWave(this.wv.glottal);
         const base = kinds[i] === 'm' ? rr(100, 135) : kinds[i] === 'f' ? rr(185, 235) : rr(260, 320);
         o.frequency.value = base; o.start();
-        const f1 = this._filter('bandpass', 700, 6), f2 = this._filter('bandpass', 1200, 9);
-        const g1 = c.createGain(), g2 = c.createGain(); g1.gain.value = 1; g2.gain.value = 0.55;
+        jit[i % 2].connect(o.detune);
         const vg = c.createGain(); vg.gain.value = 0;
-        const pan = c.createStereoPanner ? c.createStereoPanner() : null;
-        o.connect(f1); o.connect(f2); f1.connect(g1); f2.connect(g2); g1.connect(vg); g2.connect(vg);
-        if (pan) { pan.pan.value = rr(-0.8, 0.8); vg.connect(pan); pan.connect(this.crowdOut); } else vg.connect(this.crowdOut);
-        this.voices.push({ o, f1, f2, vg, base, kind: kinds[i], next: 0 });
+        const bg = c.createGain(); bg.gain.value = 0.3; breath.connect(bg);
+        const fs = [[700, 6, 1], [1200, 9, 0.55], [2600, 12, 0.18]].map(([f, q, a]) => {
+          const bp = this._filter('bandpass', f, q), g = c.createGain(); g.gain.value = a;
+          o.connect(bp); bg.connect(bp); bp.connect(g); g.connect(vg);
+          return bp;
+        });
+        this._panTo(vg, rr(-0.8, 0.8), this.crowdOut);
+        this.voices.push({ o, f1: fs[0], f2: fs[1], vg, base, kind: kinds[i], next: 0 });
       }
     }
     _crowdTick(now) {
       const dens = this.env.crowd;
       this.crowdOut.gain.setTargetAtTime(dens * 0.16, now, 0.6);
+      this.murmur.gain.setTargetAtTime(Math.min(1, dens * 1.5) * 0.55, now, 1);
       if (dens < 0.02) return;
       const VOW = [[800, 1200], [400, 2300], [300, 2600], [480, 820], [330, 720], [650, 1700], [550, 1000]];
       for (const v of this.voices) {
         if (now < v.next) continue;
-        // une phrase de 2 à 6 syllabes, puis une pause
+        // une phrase de 2 à 6 syllabes, intonation descendante, puis une pause
         const syl = 2 + Math.floor(R() * 5);
         let t = now + rr(0, 0.05);
+        const k = v.kind === 'c' ? 1.2 : v.kind === 'f' ? 1.1 : 1;
         for (let i = 0; i < syl; i++) {
           const d = rr(0.08, 0.2), w = VOW[Math.floor(R() * VOW.length)];
-          const p = v.base * rr(0.9, 1.2) * (i === syl - 1 ? 0.88 : 1);
-          v.o.frequency.setTargetAtTime(p, t, 0.02);
-          v.f1.frequency.setTargetAtTime(w[0] * (v.kind === 'c' ? 1.2 : v.kind === 'f' ? 1.1 : 1), t, 0.015);
-          v.f2.frequency.setTargetAtTime(w[1] * (v.kind === 'c' ? 1.2 : v.kind === 'f' ? 1.1 : 1), t, 0.015);
-          v.vg.gain.setTargetAtTime(rr(0.5, 1), t, 0.015);
-          v.vg.gain.setTargetAtTime(0, t + d * 0.8, 0.02);
+          const p = v.base * rr(0.92, 1.15) * (1 - i / syl * 0.12);
+          v.o.frequency.setTargetAtTime(p, t, 0.03);
+          v.f1.frequency.setTargetAtTime(w[0] * k, t, 0.02);
+          v.f2.frequency.setTargetAtTime(w[1] * k, t, 0.02);
+          v.vg.gain.setTargetAtTime(rr(0.5, 1), t, 0.02);
+          v.vg.gain.setTargetAtTime(0, t + d * 0.8, 0.025);
           t += d + rr(0.01, 0.06);
         }
         v.next = t + rr(0.3, 2.5) / Math.max(0.3, dens);
@@ -563,38 +689,48 @@ window.DZ = window.DZ || {};
       // rire d'enfant de temps en temps
       if (R() < 0.006 * dens) this._laugh(now);
     }
+    /* Rire : des « ha » soufflés qui descendent. */
     _laugh(t) {
       const c = this.ctx, n = 4 + Math.floor(R() * 3);
-      const o = this.out(null, { bus: this.ambBus });
+      const out = c.createGain(); out.gain.value = 0.055 * this.env.crowd; this._panTo(out, rr(-0.7, 0.7));
+      let st = t;
       for (let i = 0; i < n; i++) {
-        const st = t + i * 0.13, f = 420 - i * 18 + rr(-10, 10);
-        const s = this._osc('sawtooth', f, st, 0.12);
-        const f1 = this._filter('bandpass', 950, 5), f2 = this._filter('bandpass', 1500, 7), sum = c.createGain(), env = c.createGain();
-        s.connect(f1); s.connect(f2); f1.connect(sum); f2.connect(sum); sum.connect(env); env.connect(o.g);
-        this._env(env.gain, st, 0.01, 0.12 * this.env.crowd, 0.03, 0.07);
+        const f = 430 - i * 15 + rr(-12, 12);
+        const s = c.createOscillator(); s.setPeriodicWave(this.wv.glottal);
+        s.frequency.setValueAtTime(f * 1.05, st); s.frequency.linearRampToValueAtTime(f * 0.92, st + 0.1); s.start(st); s.stop(st + 0.16);
+        const h = c.createBufferSource(); h.buffer = this.pink; h.start(st, R() * 3, 0.16);
+        const hg = c.createGain(); hg.gain.setValueAtTime(0.6, st); hg.gain.setTargetAtTime(0.12, st + 0.02, 0.02); h.connect(hg);
+        const sum = c.createGain(); s.connect(sum); hg.connect(sum);
+        const env = c.createGain();
+        for (const [ff, q, a] of [[900, 5, 1], [1500, 7, 0.6], [3000, 9, 0.2]]) { const bp = this._filter('bandpass', ff, q), g = c.createGain(); g.gain.value = a; sum.connect(bp); bp.connect(g); g.connect(env); }
+        env.connect(out);
+        env.gain.setValueAtTime(0.0001, st); env.gain.linearRampToValueAtTime(1, st + 0.015); env.gain.setTargetAtTime(0.0001, st + 0.07, 0.025);
+        st += rr(0.12, 0.16);
       }
-      o.g.gain.value = 1;
     }
     /* Réaction de la foule : « Ooooh ! » (ou cris de peur). */
     crowdReact(kind) {
       if (!this.ready() || this.env.crowd < 0.05) return;
       if (!this._throttle('react', 4000)) return;
       const c = this.ctx, t = c.currentTime + 0.25;
-      const o = this.out(null, { bus: this.ambBus });
       const scared = kind === 'peur';
-      for (let i = 0; i < 9; i++) {
+      const out = c.createGain(); out.gain.value = 0.08 * Math.min(1, this.env.crowd * 2);
+      out.connect(this.ambBus);
+      const F = scared ? [[850, 5, 1], [1400, 7, 0.6], [2700, 9, 0.2]] : [[450, 5, 1], [800, 7, 0.55], [2600, 9, 0.12]];
+      for (let i = 0; i < 12; i++) {
         const base = i % 3 === 0 ? rr(110, 140) : i % 3 === 1 ? rr(190, 240) : rr(270, 330);
-        const st = t + rr(0, 0.25), dur = scared ? rr(0.6, 1.1) : rr(1.2, 1.8);
-        const s = this._osc('sawtooth', base, st, dur + 0.2);
+        const st = t + rr(0, 0.3), dur = scared ? rr(0.6, 1.1) : rr(1.2, 1.9);
+        const s = c.createOscillator(); s.setPeriodicWave(this.wv.glottal);
         s.frequency.setValueAtTime(base * (scared ? 1.6 : 0.95), st);
         s.frequency.linearRampToValueAtTime(base * (scared ? 1.9 : 1.15), st + dur * 0.35);
         s.frequency.linearRampToValueAtTime(base * (scared ? 1.4 : 0.85), st + dur);
-        const vow = scared ? [850, 1400] : [450, 800];
-        const f1 = this._filter('bandpass', vow[0], 5), f2 = this._filter('bandpass', vow[1], 7), sum = c.createGain(), env = c.createGain();
-        s.connect(f1); s.connect(f2); f1.connect(sum); f2.connect(sum); sum.connect(env); env.connect(o.g);
-        this._env(env.gain, st, dur * 0.3, 0.09 * Math.min(1, this.env.crowd * 2), dur * 0.3, dur * 0.4);
+        const l = this._osc('sine', rr(4.5, 6), st, dur + 0.3), lg = c.createGain(); lg.gain.value = rr(15, 30); l.connect(lg); lg.connect(s.detune);
+        s.start(st); s.stop(st + dur + 0.3);
+        const env = c.createGain();
+        for (const [ff, q, a] of F) { const bp = this._filter('bandpass', ff * (i % 3 === 2 ? 1.15 : 1), q), g = c.createGain(); g.gain.value = a; s.connect(bp); bp.connect(g); g.connect(env); }
+        this._panTo(env, rr(-0.85, 0.85), out);
+        env.gain.setValueAtTime(0.0001, st); env.gain.linearRampToValueAtTime(1, st + dur * 0.3); env.gain.setValueAtTime(1, st + dur * 0.6); env.gain.linearRampToValueAtTime(0.0001, st + dur);
       }
-      o.g.gain.value = 1;
     }
 
     /* ------------------------------------------------------------------
@@ -631,8 +767,9 @@ window.DZ = window.DZ || {};
       this.b.river.gain.setTargetAtTime(e.fresh * near * 0.11, now, 0.6);
       if (e.fresh > 0.01) for (const bp of this.riverBands) bp.frequency.setTargetAtTime(rr(450, 2400), now, 0.05);
       // pluie
-      this.b.rainHi.gain.setTargetAtTime(storm * 0.16, now, 0.8);
-      this.b.rainMid.gain.setTargetAtTime(storm * 0.14, now, 0.8);
+      // la pluie arrive par vagues, au rythme des rafales
+      this.b.rainHi.gain.setTargetAtTime(storm * 0.16 * (0.75 + this.gust * 0.3), now, 0.8);
+      this.b.rainMid.gain.setTargetAtTime(storm * 0.14 * (0.8 + this.gust * 0.2), now, 0.8);
       this.b.rainLow.gain.setTargetAtTime(storm * 0.18, now, 0.8);
       if (storm > 0.05) this._drops(now, storm);
       // cigales (journées chaudes, végétation)
@@ -656,50 +793,68 @@ window.DZ = window.DZ || {};
     }
 
     _drops(now, storm) {
-      const c = this.ctx, n = Math.floor(storm * 6 + R() * 2);
+      const c = this.ctx, n = Math.floor(storm * 5 + R() * 2);
       for (let i = 0; i < n; i++) {
-        const t = now + R() * 0.1;
-        const s = c.createBufferSource(); s.buffer = this.white; s.start(t, R() * 3, 0.03);
-        const bp = this._filter('bandpass', rr(2500, 7500), rr(2, 6)), g = c.createGain();
-        const pan = c.createStereoPanner ? c.createStereoPanner() : null;
-        s.connect(bp); bp.connect(g);
-        if (pan) { pan.pan.value = rr(-1, 1); g.connect(pan); pan.connect(this.ambBus); } else g.connect(this.ambBus);
-        this._env(g.gain, t, 0.001, rr(0.02, 0.09) * storm, 0.002, 0.025);
+        const t = now + R() * 0.1, g = c.createGain();
+        this._panTo(g, rr(-1, 1));
+        if (R() < 0.3) { // goutte dans une flaque : petite bulle qui monte
+          const f = rr(1400, 4200), o = this._osc('sine', f, t, 0.08);
+          o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * rr(1.4, 2), t + 0.04);
+          o.connect(g);
+          g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(rr(0.006, 0.025) * storm, t + 0.002); g.gain.setTargetAtTime(0.0001, t + 0.004, 0.012);
+        } else { // impact sur les feuilles, le toit, le sol
+          const s = c.createBufferSource(); s.buffer = this.white; s.start(t, R() * 3, 0.04);
+          const bp = this._filter('bandpass', rr(1800, 7000), rr(1.5, 5));
+          s.connect(bp); bp.connect(g);
+          this._env(g.gain, t, 0.001, rr(0.02, 0.08) * storm, 0.002, rr(0.015, 0.035));
+        }
       }
     }
 
-    _pan(node) {
-      if (!this.ctx.createStereoPanner) { node.connect(this.ambBus); return; }
-      const p = this.ctx.createStereoPanner(); p.pan.value = rr(-0.9, 0.9);
-      node.connect(p); p.connect(this.ambBus);
+    _pan(node) { this._panTo(node, rr(-0.9, 0.9)); }
+    _panTo(node, v, bus) {
+      bus = bus || this.ambBus;
+      if (!this.ctx.createStereoPanner) { node.connect(bus); return; }
+      const p = this.ctx.createStereoPanner(); p.pan.value = v;
+      node.connect(p); p.connect(bus);
     }
 
+    /* Oiseaux : cinq chants, faits de notes glissées avec leur harmonique. */
     _bird(t) {
-      const c = this.ctx, kind = Math.floor(R() * 4);
-      const out = c.createGain(); out.gain.value = rr(0.4, 1); this._pan(out);
-      if (kind === 0) { // gazouillis
-        const base = rr(2200, 4200), n = 2 + Math.floor(R() * 5);
+      const c = this.ctx, kind = Math.floor(R() * 5);
+      const out = c.createGain(); out.gain.value = rr(0.3, 0.8); this._pan(out);
+      const note = (st, f1, f2, d, a, harm, vib) => {
+        const g = c.createGain();
+        for (const [m, amp] of harm ? [[1, 1], [2, harm]] : [[1, 1]]) {
+          const o = this._osc('sine', f1 * m, st, d + 0.02);
+          o.frequency.setValueAtTime(f1 * m, st); o.frequency.exponentialRampToValueAtTime(f2 * m, st + d);
+          if (vib) { const l = this._osc('sine', vib[0], st, d), lg = c.createGain(); lg.gain.value = vib[1] * m; l.connect(lg); lg.connect(o.frequency); }
+          const ga = c.createGain(); ga.gain.value = amp; o.connect(ga); ga.connect(g);
+        }
+        g.connect(out);
+        const at = Math.min(0.012, d * 0.25);
+        g.gain.setValueAtTime(0.0001, st); g.gain.linearRampToValueAtTime(a, st + at); g.gain.setValueAtTime(a, st + Math.max(at + 0.002, d * 0.6)); g.gain.linearRampToValueAtTime(0.0001, st + d);
+      };
+      if (kind === 0) { // phrase flûtée variée (type merle)
+        let st = t; const base = rr(1500, 2500), n = 4 + Math.floor(R() * 5);
+        const steps = [1, 1.12, 1.26, 0.89, 1.5, 0.75, 1.33];
         for (let i = 0; i < n; i++) {
-          const st = t + i * rr(0.08, 0.16), o = this._osc('sine', base, st, 0.12), g = c.createGain();
-          o.frequency.setValueAtTime(base * rr(0.85, 1.1), st); o.frequency.exponentialRampToValueAtTime(base * rr(1.15, 1.5), st + 0.07);
-          o.connect(g); g.connect(out); this._env(g.gain, st, 0.008, 0.03, 0.02, 0.07);
+          const f = base * steps[Math.floor(R() * steps.length)], d = rr(0.07, 0.22);
+          note(st, f * rr(0.92, 1.05), f * rr(0.88, 1.18), d, 0.028, 0.15, R() < 0.3 ? [rr(25, 40), f * 0.04] : null);
+          st += d + rr(0.02, 0.08);
         }
-      } else if (kind === 1) { // trille
-        const base = rr(3000, 5000), st = t, dur = rr(0.6, 1.2), o = this._osc('sine', base, st, dur), am = c.createGain();
-        const lfo = this._osc('sine', rr(18, 30), st, dur), lg = c.createGain(); lg.gain.value = 0.5; lfo.connect(lg); lg.connect(am.gain); am.gain.value = 0.5;
-        const g = c.createGain(); o.connect(am); am.connect(g); g.connect(out); this._env(g.gain, st, 0.05, 0.02, dur * 0.6, dur * 0.3);
-      } else if (kind === 2) { // roucoulement
-        for (let i = 0; i < 3; i++) {
-          const st = t + i * 0.45, f = rr(380, 460), o = this._osc('sine', f, st, 0.4), g = c.createGain();
-          const v = this._osc('sine', 6, st, 0.4), vg = c.createGain(); vg.gain.value = 12; v.connect(vg); vg.connect(o.frequency);
-          o.connect(g); g.connect(out); this._env(g.gain, st, 0.06, 0.035, 0.12, 0.2);
-        }
-      } else { // appel sifflé à deux notes
-        const f = rr(1800, 2800);
-        for (let i = 0; i < 2; i++) {
-          const st = t + i * 0.3, o = this._osc('sine', i ? f * 0.8 : f, st, 0.25), g = c.createGain();
-          o.connect(g); g.connect(out); this._env(g.gain, st, 0.02, 0.03, 0.1, 0.12);
-        }
+      } else if (kind === 1) { // gazouillis rapide
+        const base = rr(2600, 4400), n = 3 + Math.floor(R() * 6); let st = t;
+        for (let i = 0; i < n; i++) { const d = rr(0.03, 0.07); note(st, base * rr(0.8, 1.05), base * rr(1.15, 1.6), d, 0.025, 0.08); st += d + rr(0.02, 0.06); }
+      } else if (kind === 2) { // trille : deux hauteurs alternées très vite
+        const a = rr(3200, 4800), b = a * rr(0.82, 0.9), n = 10 + Math.floor(R() * 14), rate = rr(0.045, 0.065);
+        for (let i = 0; i < n; i++) { const f = i % 2 ? b : a; note(t + i * rate, f, f * 1.06, rate * 0.75, 0.018 * (1 - i / n * 0.5), 0.05); }
+      } else if (kind === 3) { // tourterelle : trois roucoulements doux
+        const f = rr(420, 520);
+        for (const [dt, d, m] of [[0, 0.32, 0.9], [0.42, 0.55, 1.1], [1.05, 0.38, 0.85]]) note(t + dt, f * m, f * m * 0.94, d, 0.03, 0.25, [rr(5, 7), f * 0.02]);
+      } else { // appel en deux notes descendantes répété (type mésange)
+        const f = rr(3000, 4200), rep = 2 + Math.floor(R() * 3);
+        for (let r = 0; r < rep; r++) { const st = t + r * 0.42; note(st, f, f * 0.97, 0.12, 0.025, 0.1); note(st + 0.16, f * 0.72, f * 0.7, 0.14, 0.022, 0.1); }
       }
     }
 
@@ -713,56 +868,90 @@ window.DZ = window.DZ || {};
         const g = c.createGain(); o.connect(g); g.connect(out); this._env(g.gain, st, 0.02, 0.035, 0.08, 0.12);
       }
     }
-    _gull(t) {
+    _gull(t) { // mouette : cri rauque nasillard
       const c = this.ctx, out = c.createGain(); out.gain.value = rr(0.4, 0.8); this._pan(out);
       for (let i = 0; i < 3; i++) {
-        const st = t + i * 0.32, f = rr(1300, 1700), o = this._osc('sawtooth', f, st, 0.3);
-        o.frequency.setValueAtTime(f * 1.2, st); o.frequency.exponentialRampToValueAtTime(f * 0.75, st + 0.28);
-        const bp = this._filter('bandpass', 2200, 3), g = c.createGain(); o.connect(bp); bp.connect(g); g.connect(out); this._env(g.gain, st, 0.02, 0.03, 0.08, 0.15);
+        const st = t + i * rr(0.28, 0.36), f = rr(1100, 1500), d = rr(0.22, 0.3);
+        const o = c.createOscillator(); o.setPeriodicWave(this.wv.reed);
+        o.frequency.setValueAtTime(f * 1.25, st); o.frequency.exponentialRampToValueAtTime(f * 0.75, st + d); o.start(st); o.stop(st + d + 0.05);
+        const am = c.createGain(); am.gain.value = 0.7; const l = this._osc('triangle', rr(50, 70), st, d), lg = c.createGain(); lg.gain.value = 0.3; l.connect(lg); lg.connect(am.gain);
+        const b1 = this._filter('bandpass', 1900, 3), b2 = this._filter('bandpass', 3300, 4), g = c.createGain();
+        o.connect(am); am.connect(b1); am.connect(b2); b1.connect(g); b2.connect(g); g.connect(out);
+        this._env(g.gain, st, 0.015, 0.05, d * 0.4, d * 0.5);
       }
     }
     _cricket(t) {
       const c = this.ctx, out = c.createGain(); out.gain.value = rr(0.3, 1); this._pan(out);
-      const f = rr(4100, 4700);
-      for (let i = 0; i < 3; i++) {
-        const st = t + i * 0.065, o = this._osc('triangle', f, st, 0.05), g = c.createGain();
-        o.connect(g); g.connect(out); this._env(g.gain, st, 0.004, 0.018, 0.015, 0.025);
-      }
-    }
-    _frog(t) {
-      const c = this.ctx, out = c.createGain(); out.gain.value = rr(0.5, 1); this._pan(out);
-      const n = 1 + Math.floor(R() * 3), f = rr(140, 220);
+      const f = rr(4100, 4700), n = 3 + Math.floor(R() * 2);
       for (let i = 0; i < n; i++) {
-        const st = t + i * 0.28, o = this._osc('square', f, st, 0.22);
-        o.frequency.setValueAtTime(f * 1.2, st); o.frequency.exponentialRampToValueAtTime(f * 0.75, st + 0.18);
-        const lp = this._filter('lowpass', 700, 3), g = c.createGain(); o.connect(lp); lp.connect(g); g.connect(out); this._env(g.gain, st, 0.02, 0.045, 0.05, 0.14);
+        const st = t + i * 0.06, g = c.createGain();
+        for (const [m, a] of [[1, 1], [2, 0.12]]) { const o = this._osc('sine', f * m, st, 0.04), ga = c.createGain(); ga.gain.value = a; o.connect(ga); ga.connect(g); }
+        g.connect(out); this._env(g.gain, st, 0.004, 0.016, 0.014, 0.018);
       }
     }
-    _owl(t) {
+    _frog(t) { // coassement : gorge qui pulse vite
+      const c = this.ctx, out = c.createGain(); out.gain.value = rr(0.5, 1); this._pan(out);
+      const n = 1 + Math.floor(R() * 3), f = rr(160, 260), pr = rr(25, 45);
+      for (let i = 0; i < n; i++) {
+        const st = t + i * rr(0.3, 0.45), d = rr(0.18, 0.3);
+        const o = c.createOscillator(); o.setPeriodicWave(this.wv.glottal);
+        o.frequency.setValueAtTime(f * 1.1, st); o.frequency.exponentialRampToValueAtTime(f * 0.85, st + d); o.start(st); o.stop(st + d + 0.05);
+        const am = c.createGain(); am.gain.value = 0.5; const l = this._osc('triangle', pr, st, d), lg = c.createGain(); lg.gain.value = 0.5; l.connect(lg); lg.connect(am.gain);
+        const b1 = this._filter('bandpass', rr(500, 800), 4), b2 = this._filter('bandpass', rr(1300, 1800), 6), g = c.createGain();
+        o.connect(am); am.connect(b1); am.connect(b2); b1.connect(g); b2.connect(g); g.connect(out);
+        this._env(g.gain, st, 0.02, 0.08, d * 0.6, 0.06);
+      }
+    }
+    _owl(t) { // hibou : « hou… hou-hou » feutré
       const c = this.ctx, out = c.createGain(); out.gain.value = 0.6; this._pan(out);
-      for (let i = 0; i < 2; i++) {
-        const st = t + i * 0.6, f = rr(340, 380), o = this._osc('sine', f, st, 0.55), g = c.createGain();
-        o.frequency.setValueAtTime(f, st); o.frequency.linearRampToValueAtTime(f * 0.92, st + 0.5);
-        o.connect(g); g.connect(out); this._env(g.gain, st, 0.08, 0.05, 0.15, 0.3);
+      const f = rr(330, 380);
+      for (const [dt, d, m] of [[0, 0.5, 1], [0.75, 0.22, 0.97], [1.05, 0.55, 0.94]]) {
+        const st = t + dt, o = c.createOscillator(); o.setPeriodicWave(this.wv.soft);
+        o.frequency.setValueAtTime(f * m * 1.02, st); o.frequency.linearRampToValueAtTime(f * m * 0.93, st + d); o.start(st); o.stop(st + d + 0.1);
+        const n = this._src(this.pink, st, d + 0.1), nb = this._filter('bandpass', f * 2, 3), ng = c.createGain(); ng.gain.value = 0.15; n.connect(nb); nb.connect(ng);
+        const g = c.createGain(); o.connect(g); ng.connect(g); g.connect(out);
+        this._env(g.gain, st, Math.min(0.08, d * 0.3), 0.05, d * 0.4, d * 0.4);
       }
     }
 
-    /* Tonnerre roulant : claquement puis grondement irrégulier. */
+    /* Tonnerre : crépitement (si l'éclair est proche), grondement roulant
+       irrégulier et infrabasse, avec un écho prolongé. */
     thunder() {
       if (!this.ready()) return;
-      const c = this.ctx, t = c.currentTime + rr(0.2, 1.5);
-      const pan = c.createStereoPanner ? c.createStereoPanner() : null;
-      const out = c.createGain(); out.gain.value = 1;
-      if (pan) { pan.pan.value = rr(-0.7, 0.7); out.connect(pan); pan.connect(this.ambBus); } else out.connect(this.ambBus);
-      const cr = this._src(this.white, t, 0.4), crh = this._filter('highpass', 900), crg = c.createGain();
-      cr.connect(crh); crh.connect(crg); crg.connect(out); this._env(crg.gain, t, 0.005, 0.35, 0.03, 0.3);
-      const n = this._src(this.brown, t, 6), lp = this._filter('lowpass', 180, 0.8), g = c.createGain();
+      const c = this.ctx, dist = R();
+      const t = c.currentTime + 0.2 + dist * 2.5;
+      const out = c.createGain(); out.gain.value = 0.7 * (1 - dist * 0.45);
+      this._panTo(out, rr(-0.7, 0.7));
+      const send = c.createGain(); send.gain.value = 0.6; out.connect(send); send.connect(this.reverb);
+      if (dist < 0.55) {
+        for (let i = 0; i < 8; i++) { // crépitement de l'arc
+          const st = t + i * rr(0.008, 0.035), s = c.createBufferSource(); s.buffer = this.white; s.start(st, R() * 3, 0.04);
+          const hp = this._filter('highpass', rr(1200, 3000)), g = c.createGain(); s.connect(hp); hp.connect(g); g.connect(out);
+          this._env(g.gain, st, 0.001, 0.4 * (1 - i / 9), 0.004, 0.03);
+        }
+        const cr = this._src(this.white, t, 0.8), crl = this._filter('lowpass', 3000), cg = c.createGain();
+        cr.connect(crl); crl.connect(cg); cg.connect(out); this._env(cg.gain, t, 0.003, 0.45, 0.02, 0.35);
+      }
+      const len = rr(4, 7), t1 = t + (dist < 0.55 ? 0.08 : 0);
+      const n = this._src(this.brown, t1, len + 2.5), lp = this._filter('lowpass', 260, 0.8), g = c.createGain();
+      const n2 = this._src(this.pink, t1, len + 1), lp2 = this._filter('lowpass', 700, 0.7), g2 = c.createGain();
       n.connect(lp); lp.connect(g); g.connect(out);
-      g.gain.setValueAtTime(0.0001, t);
-      let tt = t + 0.05;
-      for (let i = 0; i < 6; i++) { const pk = rr(0.4, 1.1) * (1 - i * 0.12); g.gain.exponentialRampToValueAtTime(Math.max(0.01, pk), tt + rr(0.05, 0.2)); tt += rr(0.3, 0.9); g.gain.exponentialRampToValueAtTime(Math.max(0.01, pk * 0.35), tt); }
-      g.gain.exponentialRampToValueAtTime(0.0001, tt + 2);
-      lp.frequency.setValueAtTime(400, t); lp.frequency.exponentialRampToValueAtTime(120, tt + 1);
+      n2.connect(lp2); lp2.connect(g2); g2.connect(out);
+      for (const [gg, k] of [[g, 1.1], [g2, 0.3]]) {
+        gg.gain.setValueAtTime(0.0001, t1);
+        let tt = t1 + 0.04;
+        for (let i = 0; i < 7; i++) {
+          const pk = rr(0.4, 1) * (1 - i * 0.11) * k;
+          gg.gain.exponentialRampToValueAtTime(Math.max(0.01, pk), tt + rr(0.05, 0.25));
+          tt += rr(0.3, 0.9);
+          gg.gain.exponentialRampToValueAtTime(Math.max(0.005, pk * 0.3), tt);
+        }
+        gg.gain.exponentialRampToValueAtTime(0.0001, tt + 2);
+      }
+      lp.frequency.setValueAtTime(dist < 0.55 ? 500 : 280, t1); lp.frequency.exponentialRampToValueAtTime(90, t1 + len + 1);
+      lp2.frequency.setValueAtTime(1200, t1); lp2.frequency.exponentialRampToValueAtTime(200, t1 + len);
+      const sub = this._osc('sine', rr(32, 45), t1, len + 1), sg = c.createGain();
+      sub.connect(sg); sg.connect(out); this._env(sg.gain, t1, 0.3, 0.35, len * 0.3, len * 0.6);
     }
 
     /* ------------------------------------------------------------------
@@ -836,16 +1025,20 @@ window.DZ = window.DZ || {};
         case 'build': {
           const o = this.out(pos || null, { range: 60, bus: pos ? this.sfxBus : this.uiBus });
           if (!o) return;
-          const n = this._src(this.brown, t, 0.4), l = this._filter('lowpass', 420), g = c.createGain();
-          n.connect(l); l.connect(g); g.connect(o.g); this._env(g.gain, t, 0.004, 0.7, 0.05, 0.25);
+          // poutres posées au sol
+          const n = this._src(this.brown, t, 0.5), l = this._filter('lowpass', 300), g = c.createGain();
+          n.connect(l); l.connect(g); g.connect(o.g); this._env(g.gain, t, 0.004, 0.8, 0.04, 0.3);
+          // coups de maillet : modes de vibration d'une planche + choc
           for (let i = 0; i < 4; i++) {
-            const st = t + 0.12 + i * rr(0.09, 0.14), f = rr(380, 620);
-            const s = this._osc('triangle', f, st, 0.12), bp = this._filter('bandpass', f * 2.2, 4), gg = c.createGain();
-            s.connect(bp); bp.connect(gg); gg.connect(o.g); this._env(gg.gain, st, 0.002, 0.35, 0.005, 0.07);
-            const k = this._src(this.white, st, 0.05), kb = this._filter('bandpass', 2500, 2), kg = c.createGain();
-            k.connect(kb); kb.connect(kg); kg.connect(o.g); this._env(kg.gain, st, 0.001, 0.15, 0.002, 0.03);
+            const st = t + 0.14 + i * rr(0.1, 0.15), f = rr(260, 420);
+            for (const [r, a, d] of [[1, 1, 0.09], [2.57, 0.5, 0.05], [4.9, 0.25, 0.03], [7.3, 0.1, 0.02]]) {
+              const s = this._osc('sine', f * r, st, d * 5), gg = c.createGain();
+              s.connect(gg); gg.connect(o.g); gg.gain.setValueAtTime(0.0001, st); gg.gain.linearRampToValueAtTime(0.28 * a, st + 0.0015); gg.gain.setTargetAtTime(0.0001, st + 0.003, d / 3);
+            }
+            const k = this._src(this.white, st, 0.03), kb = this._filter('bandpass', 1800, 1.5), kg = c.createGain();
+            k.connect(kb); kb.connect(kg); kg.connect(o.g); this._env(kg.gain, st, 0.001, 0.2, 0.002, 0.02);
           }
-          o.g.gain.value = 0.8; setTimeout(o.end, 1000);
+          o.g.gain.value = 0.36; setTimeout(o.end, 1300);
           break;
         }
         case 'upgrade': { // glissando de harpe
@@ -856,10 +1049,12 @@ window.DZ = window.DZ || {};
           });
           break;
         }
-        case 'click': {
+        case 'click': { // petit déclic boisé
           const o = this.out(null, { bus: this.uiBus });
-          const s = this._osc('sine', 1200, t, 0.06), g = c.createGain();
-          s.frequency.exponentialRampToValueAtTime(700, t + 0.04); s.connect(g); g.connect(o.g); this._env(g.gain, t, 0.002, 0.08, 0.005, 0.04);
+          const k = c.createBufferSource(); k.buffer = this.white; k.start(t, R() * 3, 0.03);
+          const kb = this._filter('bandpass', 3200, 2.5), kg = c.createGain(); k.connect(kb); kb.connect(kg); kg.connect(o.g); this._env(kg.gain, t, 0.001, 0.14, 0.002, 0.02);
+          const s = this._osc('sine', 1100, t, 0.06), g = c.createGain();
+          s.frequency.exponentialRampToValueAtTime(760, t + 0.03); s.connect(g); g.connect(o.g); this._env(g.gain, t, 0.001, 0.08, 0.003, 0.03);
           break;
         }
         case 'error': {
@@ -880,18 +1075,24 @@ window.DZ = window.DZ || {};
           if (!this._throttle('splash', 350)) return;
           const o = this.out(pos || null, { range: 50 });
           if (!o) return;
-          const n = this._src(this.white, t, 0.9), bp = this._filter('bandpass', 1100, 0.7), g = c.createGain();
-          bp.frequency.setValueAtTime(600, t); bp.frequency.exponentialRampToValueAtTime(2400, t + 0.15);
-          n.connect(bp); bp.connect(g); g.connect(o.g); this._env(g.gain, t, 0.01, 0.6, 0.05, 0.6);
-          o.g.gain.value = 1; setTimeout(o.end, 1100);
+          // impact sourd, gerbe d'eau, puis gouttes qui retombent
+          const th = this._src(this.brown, t, 0.3), tl = this._filter('lowpass', 260), tg = c.createGain();
+          th.connect(tl); tl.connect(tg); tg.connect(o.g); this._env(tg.gain, t, 0.004, 0.6, 0.02, 0.15);
+          const n = this._src(this.white, t, 1.1), bp = this._filter('bandpass', 900, 0.8), lp = this._filter('lowpass', 6000), g = c.createGain();
+          bp.frequency.setValueAtTime(500, t); bp.frequency.exponentialRampToValueAtTime(2600, t + 0.12); bp.frequency.exponentialRampToValueAtTime(1400, t + 0.8);
+          n.connect(bp); bp.connect(lp); lp.connect(g); g.connect(o.g); this._env(g.gain, t, 0.01, 0.5, 0.06, 0.55);
+          this._bubbles(t + 0.15, o.g, 9, 700, 2500, 0.06, 0.9);
+          o.g.gain.value = 0.7; setTimeout(o.end, 1500);
           break;
         }
-        case 'alarm': {
+        case 'alarm': { // sirène du parc, à travers un haut-parleur
           const o = this.out(null, { bus: this.sfxBus });
           for (let i = 0; i < 6; i++) {
-            const st = t + i * 0.55, s = this._osc('sawtooth', 620, st, 0.5);
-            s.frequency.setValueAtTime(620, st); s.frequency.linearRampToValueAtTime(980, st + 0.25); s.frequency.linearRampToValueAtTime(620, st + 0.5);
-            const lp = this._filter('lowpass', 2200), g = c.createGain(); s.connect(lp); lp.connect(g); g.connect(o.g); this._env(g.gain, st, 0.02, 0.09, 0.35, 0.1);
+            const st = t + i * 0.55, s = c.createOscillator(); s.setPeriodicWave(this.wv.reed);
+            s.frequency.setValueAtTime(560, st); s.frequency.linearRampToValueAtTime(900, st + 0.25); s.frequency.linearRampToValueAtTime(560, st + 0.5); s.start(st); s.stop(st + 0.55);
+            const b1 = this._filter('peaking', 1100, 2), b2 = this._filter('peaking', 2600, 3); b1.gain.value = 8; b2.gain.value = 5;
+            const hp = this._filter('highpass', 350), sh = this._shaper(1.5), lp = this._filter('lowpass', 3800), g = c.createGain();
+            s.connect(hp); hp.connect(b1); b1.connect(b2); b2.connect(sh); sh.connect(lp); lp.connect(g); g.connect(o.g); this._env(g.gain, st, 0.02, 0.07, 0.35, 0.1);
           }
           this.crowdReact('peur');
           break;
