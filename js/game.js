@@ -41,7 +41,7 @@ window.DZ = window.DZ || {};
   /* Carte : relief (élévation), type de terrain et biome par case. */
   function generateTerrain(seed) {
     const r = U.rng(seed);
-    const terr = new Uint8Array(W * H), elev = new Float32Array(W * H), biome = new Uint8Array(W * H);
+    const terr = new Uint8Array(W * H), elev = new Float32Array(W * H), biome = new Uint8Array(W * H), shore = new Float32Array(W * H);
     const big = U.makeFbm(seed + 7, 3, 4), detail = U.makeFbm(seed + 13, 8, 3), moist = U.makeFbm(seed + 21, 3, 3), ridgeN = U.makeFbm(seed + 33, 6, 3);
     const ex = ENT.tileX, ey = ENT.tileY;
     // lac à l'ouest, rivière des montagnes au lac puis à la mer
@@ -88,8 +88,11 @@ window.DZ = window.DZ || {};
       if (zoneEntree && t !== TER.WATER) b = BIOME.PLAINS;
       if (t === TER.GRASS && b === BIOME.PLAINS && detail(u * 1.5, v * 1.5) > 0.66) t = TER.DIRT;
       terr[i] = t; elev[i] = e; biome[i] = b;
+      // distance signée à l'eau (négative dans l'eau), plus fine que la grille : rivages arrondis
+      const sdW = Math.min(-dCoast, dRiver - 1.15, dLake * Math.min(lake.rx, lake.ry), dPond);
+      shore[i] = zoneEntree ? Math.max(sdW, Math.min(3, -dCoast)) : sdW;
     }
-    return { terr, elev, biome };
+    return { terr, elev, biome, shore };
   }
 
   /* Arbres déterministes par case (selon le biome). */
@@ -120,6 +123,26 @@ window.DZ = window.DZ || {};
     }
     return { trees, at };
   }
+
+  /* ------------------------------------------------------------------
+     Forme organique des enclos : rectangle très arrondi et légèrement
+     ondulé, inscrit dans l'emprise. Distance signée (négative dedans).
+     ------------------------------------------------------------------ */
+  DZ.encShape = function (b) {
+    const def = C.buildings[b.type];
+    const hw = b.w / 2 - 0.12, hh = b.h / 2 - 0.12;
+    const r = def.kind === 'air' ? Math.min(hw, hh) : Math.min(hw, hh) * (def.kind === 'water' ? 0.75 : 0.55);
+    return { cx: b.x + b.w / 2, cy: b.y + b.h / 2, hw, hh, r, s: (b.seed % 1000) / 159, amp: def.kind === 'air' ? 0.05 : Math.min(0.3, Math.min(hw, hh) * 0.07) };
+  };
+  DZ.encSDF = function (b, x, y, sh) {
+    sh = sh || DZ.encShape(b);
+    const px = x - sh.cx, py = y - sh.cy;
+    const qx = Math.abs(px) - (sh.hw - sh.r), qy = Math.abs(py) - (sh.hh - sh.r);
+    let d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - sh.r;
+    const a = Math.atan2(py / sh.hh, px / sh.hw);
+    d += sh.amp * (Math.sin(a * 3 + sh.s) * 0.6 + Math.sin(a * 5 + sh.s * 2.3) * 0.4);
+    return d;
+  };
 
   /* ------------------------------------------------------------------
      Jeu
@@ -166,7 +189,7 @@ window.DZ = window.DZ || {};
 
     _genMap(seed) {
       const map = generateTerrain(seed);
-      this.terrain = map.terr; this.elev = map.elev; this.biome = map.biome;
+      this.terrain = map.terr; this.elev = map.elev; this.biome = map.biome; this.shore = map.shore;
       const tr = generateTrees(seed, map);
       this.trees = tr.trees; this.treeAt = tr.at;
       this.cleared = new Uint8Array(W * H);
@@ -431,6 +454,34 @@ window.DZ = window.DZ || {};
       return f;
     }
 
+    /* Centres lissés des cases de chemin : les escaliers deviennent des
+       diagonales et les virages s'arrondissent (lissage laplacien des cases
+       à deux voisins ; carrefours, extrémités et ponts restent fixes). */
+    pathCenters() {
+      if (this._pcV === this.netVersion) return this._pc;
+      const pc = new Float32Array(W * H * 2);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = idx(x, y); pc[i * 2] = x + 0.5; pc[i * 2 + 1] = y + 0.5; }
+      const nodes = [];
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = idx(x, y);
+        if (!this.path[i] || this.terrain[i] === TER.WATER) continue;
+        if (x === ENT.tileX && y === ENT.tileY) continue;
+        const nb = [];
+        for (const d of DIRS) { const nx = x + d[0], ny = y + d[1]; if (inMap(nx, ny) && this.path[idx(nx, ny)]) nb.push(idx(nx, ny)); }
+        if (nb.length === 2) nodes.push([i, nb[0], nb[1]]);
+      }
+      const tmp = new Float32Array(nodes.length * 2);
+      for (let it = 0; it < 4; it++) {
+        nodes.forEach(([i, a, b2], k) => {
+          tmp[k * 2] = pc[i * 2] * 0.5 + (pc[a * 2] + pc[b2 * 2]) * 0.25;
+          tmp[k * 2 + 1] = pc[i * 2 + 1] * 0.5 + (pc[a * 2 + 1] + pc[b2 * 2 + 1]) * 0.25;
+        });
+        nodes.forEach(([i], k) => { pc[i * 2] = tmp[k * 2]; pc[i * 2 + 1] = tmp[k * 2 + 1]; });
+      }
+      this._pc = pc; this._pcV = this.netVersion;
+      return pc;
+    }
+
     isConnected(b) {
       if (b.type === 'entree') return true;
       if (b._conV === this.netVersion) return b._con;
@@ -633,7 +684,30 @@ window.DZ = window.DZ || {};
     randomPointIn(b, spId) {
       const sp = DZ.SPECIES[spId];
       const m = this.interior(b, sp);
-      return { x: rr(m.x0, m.x1), y: rr(m.y0, m.y1) };
+      const sh = DZ.encShape(b), margin = this.shapeMargin(b, sp);
+      for (let k = 0; k < 40; k++) {
+        const x = rr(m.x0, m.x1), y = rr(m.y0, m.y1);
+        if (DZ.encSDF(b, x, y, sh) < -margin) return { x, y };
+      }
+      return { x: sh.cx, y: sh.cy };
+    }
+    shapeMargin(b, sp) {
+      const def = C.buildings[b.type];
+      if (def.kind === 'water') return 1.1;
+      if (def.kind === 'air') return 0.9;
+      return 0.55 + (sp && sp.size === 'L' ? 0.5 : sp && sp.size === 'M' ? 0.25 : 0);
+    }
+    /* Ramène un animal dans la forme de son enclos. */
+    keepInside(d, b, sp) {
+      const sh = DZ.encShape(b), m = this.shapeMargin(b, sp);
+      const sd = DZ.encSDF(b, d.x, d.y, sh);
+      if (sd > -m) {
+        const dx = sh.cx - d.x, dy = sh.cy - d.y, l = Math.hypot(dx, dy) || 1;
+        const push = Math.min(l, sd + m + 0.02);
+        d.x += dx / l * push; d.y += dy / l * push;
+        return true;
+      }
+      return false;
     }
 
     interior(b, sp) {
@@ -703,6 +777,7 @@ window.DZ = window.DZ || {};
       d.x += Math.cos(d.heading) * v * dt;
       d.y += Math.sin(d.heading) * v * dt;
       d.x = U.clamp(d.x, m.x0, m.x1); d.y = U.clamp(d.y, m.y0, m.y1);
+      if (this.keepInside(d, b, sp)) { const p = this.randomPointIn(b, d.sp); d.gx = p.x; d.gy = p.y; }
       d.face = Math.cos(d.heading) >= 0 ? 1 : -1;
       d.alt = 28 + Math.sin(d.t * 0.5) * 10;
       d.phase += dt * (Math.sin(d.t * 0.3) > 0.2 ? 0 : 7); // planés et battements
@@ -722,6 +797,7 @@ window.DZ = window.DZ || {};
       const v = sp.speed * 0.6;
       d.x = U.clamp(d.x + Math.cos(d.heading) * v * dt, m.x0, m.x1);
       d.y = U.clamp(d.y + Math.sin(d.heading) * v * dt, m.y0, m.y1);
+      if (this.keepInside(d, b, sp)) { const p = this.randomPointIn(b, d.sp); d.gx = p.x; d.gy = p.y; }
       d.face = Math.cos(d.heading) >= 0 ? 1 : -1;
       d.phase += dt * 3;
       d.moving = v;
@@ -1182,7 +1258,8 @@ window.DZ = window.DZ || {};
           g.nx = o[0]; g.ny = o[1];
         }
         const ddx = g.nx - g.tx, ddy = g.ny - g.ty;
-        const gx = g.nx + 0.5 - ddy * g.lane, gy = g.ny + 0.5 + ddx * g.lane;
+        const pcs = this.pathCenters(), ni = idx(g.nx, g.ny);
+        const gx = pcs[ni * 2] - ddy * g.lane, gy = pcs[ni * 2 + 1] + ddx * g.lane;
         const dx = gx - g.x, dy = gy - g.y, dist = Math.hypot(dx, dy);
         if (dist <= budget) {
           g.x = gx; g.y = gy; budget -= dist; g.wd += dist;
@@ -1206,7 +1283,8 @@ window.DZ = window.DZ || {};
         g.nx = g.tx + d[0]; g.ny = g.ty + d[1];
         g.wanderSteps--;
       }
-      const done = this._moveStraight(g, g.nx + 0.5, g.ny + 0.5, dt);
+      const pcs = this.pathCenters(), ni = idx(g.nx, g.ny);
+      const done = this._moveStraight(g, pcs[ni * 2], pcs[ni * 2 + 1], dt);
       if (done) { g.tx = g.nx; g.ty = g.ny; g.nx = null; this._onTile(g); }
     }
 
@@ -1297,8 +1375,9 @@ window.DZ = window.DZ || {};
       if (t.kind === 'enclos') {
         g.actT = rr(0.45, 0.95);
         g.hidden = false;
-        g.standX = g.tx + 0.5 + g.dirX * 0.28 + (-g.dirY) * rr(-0.32, 0.32);
-        g.standY = g.ty + 0.5 + g.dirY * 0.28 + g.dirX * rr(-0.32, 0.32);
+        const pcs = this.pathCenters(), ci = idx(g.tx, g.ty);
+        g.standX = pcs[ci * 2] + g.dirX * 0.22 + (-g.dirY) * rr(-0.3, 0.3);
+        g.standY = pcs[ci * 2 + 1] + g.dirY * 0.22 + g.dirX * rr(-0.3, 0.3);
       } else {
         g.hidden = true;
         g.standX = undefined;

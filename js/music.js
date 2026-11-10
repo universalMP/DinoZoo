@@ -120,119 +120,182 @@ window.DZ = window.DZ || {};
   /* ------------------------------------------------------------------
      Orchestre de synthèse
      ------------------------------------------------------------------ */
+  /* Spectres d'instruments (ondes périodiques) : beaucoup plus doux et
+     riches que les ondes en dents de scie ou carrées brutes. */
+  function waves(c) {
+    if (c.__dzWaves) return c.__dzWaves;
+    const mk = (n, fn) => { const re = new Float32Array(n + 1), im = new Float32Array(n + 1); for (let k = 1; k <= n; k++) im[k] = fn(k); return c.createPeriodicWave(re, im); };
+    c.__dzWaves = {
+      string: mk(40, (k) => (1 / k) * (k % 2 ? 1 : 0.82) * Math.exp(-k / 16)),
+      cello: mk(40, (k) => (1 / Math.pow(k, 0.9)) * Math.exp(-k / 11)),
+      horn: mk(24, (k) => Math.exp(-(k - 1) * 0.42) * (k === 2 ? 1.15 : 1)),
+      flute: mk(8, (k) => [0, 1, 0.22, 0.07, 0.035, 0.015, 0.008, 0.004, 0.002][k]),
+      choir: mk(32, (k) => 1 / Math.pow(k, 1.25)),
+      reed: mk(24, (k) => (k % 2 ? 1 : 0.45) / Math.pow(k, 0.85) * Math.exp(-k / 14))
+    };
+    return c.__dzWaves;
+  }
+
+  /* ------------------------------------------------------------------
+     Orchestre de synthèse
+     Chaque note = un ensemble de voix légèrement désaccordées, réparties
+     dans l'espace stéréo, chacune avec son propre vibrato.
+     ------------------------------------------------------------------ */
   class Orchestra {
-    constructor(sound, out) { this.s = sound; this.c = sound.ctx; this.out = out; }
+    constructor(sound, out) { this.s = sound; this.c = sound.ctx; this.out = out; this.w = waves(this.c); }
     env(p, t, a, peak, hold, rel) {
       p.setValueAtTime(0.0001, t);
-      p.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + a);
+      p.linearRampToValueAtTime(Math.max(0.0002, peak), t + a);
       p.setValueAtTime(Math.max(0.0002, peak), t + a + Math.max(0, hold));
-      p.exponentialRampToValueAtTime(0.0001, t + a + Math.max(0, hold) + rel);
+      p.setTargetAtTime(0.0001, t + a + Math.max(0, hold), rel / 3.5);
     }
-    osc(type, f, t, dur) { const o = this.c.createOscillator(); o.type = type; o.frequency.value = f; o.start(t); o.stop(t + dur); return o; }
     filt(type, f, q) { const b = this.c.createBiquadFilter(); b.type = type; b.frequency.value = f; if (q !== undefined) b.Q.value = q; return b; }
-    vibrato(target, f, t, dur, depth, delay) {
-      const l = this.osc('sine', rr(4.8, 5.6), t, dur), g = this.c.createGain();
-      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(f * depth, t + (delay || 0.3));
-      l.connect(g); g.connect(target);
+    pan(v) { if (!this.c.createStereoPanner) return null; const p = this.c.createStereoPanner(); p.pan.value = v; return p; }
+
+    /* Ensemble de voix vers une entrée commune : les voix sont réparties
+       en deux pupitres (gauche / droite), chacun avec son vibrato à lui,
+       ce qui garde l'ampleur stéréo pour un coût modeste. */
+    ensemble(wave, f, t, end, input, o) {
+      const c = this.c, n = o.voices || 4, w = o.width || 0.6;
+      const sides = [];
+      for (let k = 0; k < (n > 1 ? 2 : 1); k++) {
+        const g = c.createGain(); g.gain.value = 1 / Math.sqrt(n);
+        const p = n > 1 ? this.pan(k ? w : -w) : null;
+        if (p) { g.connect(p); p.connect(input); } else g.connect(input);
+        let lg = null;
+        if (o.vib) {
+          const l = c.createOscillator(); l.frequency.value = rr(4.7, 5.6) + k * 0.37;
+          lg = c.createGain();
+          lg.gain.setValueAtTime(0, t); lg.gain.linearRampToValueAtTime(o.vib * rr(0.8, 1.15), t + (o.vibDelay || 0.4));
+          l.connect(lg); l.start(t); l.stop(end);
+        }
+        sides.push({ g, lg });
+      }
+      for (let i = 0; i < n; i++) {
+        const osc = c.createOscillator();
+        osc.setPeriodicWave(wave);
+        osc.frequency.value = f;
+        const spread = n > 1 ? i / (n - 1) * 2 - 1 : 0;
+        osc.detune.value = spread * (o.detune || 10) + rr(-2.5, 2.5);
+        const sd = sides[i % sides.length];
+        if (sd.lg) sd.lg.connect(osc.detune);
+        osc.connect(sd.g);
+        osc.start(t + rr(0, o.stagger || 0.015)); osc.stop(end);
+      }
     }
-    play(inst, m, t, dur, vel) {
+
+    play(inst, m, t, dur, vel, extra) {
       const f = mtof(m), fn = this[inst];
-      if (fn) fn.call(this, f, t, dur, vel, m);
+      if (fn) fn.call(this, f, t, dur, vel, m, extra);
     }
+
+    /* Cordes : nappes en legato avec montée lente. */
     strings(f, t, dur, vel) {
-      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 1100 + vel * 2200, 0.4);
-      for (const det of [-9, 0, 8]) {
-        const o = this.osc('sawtooth', f, t, dur + 1.2); o.detune.value = det + rr(-2, 2);
-        this.vibrato(o.frequency, f, t, dur + 1.2, 0.004, 0.4);
-        o.connect(lp);
-      }
-      lp.connect(g); g.connect(this.out);
-      const a = Math.min(0.5, dur * 0.35);
-      this.env(g.gain, t, a, 0.035 * vel, dur - a, 0.9);
+      const c = this.c, g = c.createGain();
+      const lp = this.filt('lowpass', 1500 + vel * 1700, 0.35), hp = this.filt('highpass', 90);
+      const body = this.filt('peaking', 420, 1.1); body.gain.value = 3;
+      this.ensemble(this.w.string, f, t, t + dur + 1.8, lp, { voices: 4, detune: 12, vib: 7, vibDelay: 0.6, width: 0.7, stagger: 0.04 });
+      lp.connect(body); body.connect(hp); hp.connect(g); g.connect(this.out);
+      const a = U_clamp(dur * 0.45, 0.18, 1.3);
+      this.env(g.gain, t, a, 0.05 * vel, dur - a, 1.8);
     }
-    stacc(f, t, dur, vel) { // cordes détachées (ostinato)
-      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 2400, 0.6);
-      for (const det of [-6, 6]) { const o = this.osc('sawtooth', f, t, 0.35); o.detune.value = det; o.connect(lp); }
+    /* Ostinato de cordes détaché, mais doux (pas de grésillement). */
+    stacc(f, t, dur, vel) {
+      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 1300 + vel * 500, 0.3);
+      this.ensemble(this.w.cello, f, t, t + 0.7, lp, { voices: 2, detune: 8, width: 0.4 });
       lp.connect(g); g.connect(this.out);
-      this.env(g.gain, t, 0.008, 0.05 * vel, 0.04, Math.min(0.22, dur * 0.9));
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.035 * vel, t + 0.025);
+      g.gain.setTargetAtTime(0.0001, t + 0.05, Math.min(0.12, dur * 0.35));
     }
+    /* Cors : chaleureux, le filtre s'ouvre à l'attaque. */
     horn(f, t, dur, vel) {
-      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 400, 1.2);
-      lp.frequency.setValueAtTime(350, t);
-      lp.frequency.exponentialRampToValueAtTime(800 + vel * 1500, t + 0.12);
-      lp.frequency.setTargetAtTime(600 + vel * 900, t + 0.15, 0.4);
-      for (const [type, det, a] of [['sawtooth', -4, 1], ['sawtooth', 5, 1], ['square', 0, 0.35]]) {
-        const o = this.osc(type, f, t, dur + 0.8), og = c.createGain(); og.gain.value = a; o.detune.value = det;
-        this.vibrato(o.frequency, f, t, dur + 0.8, 0.003, 0.5);
-        o.connect(og); og.connect(lp);
-      }
+      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 500, 0.6);
+      lp.frequency.setValueAtTime(420, t);
+      lp.frequency.linearRampToValueAtTime(700 + vel * 1100, t + 0.22);
+      lp.frequency.setTargetAtTime(560 + vel * 700, t + 0.3, 0.6);
+      this.ensemble(this.w.horn, f, t, t + dur + 1.5, lp, { voices: 3, detune: 7, vib: 4, vibDelay: 0.5, width: 0.35, stagger: 0.03 });
       lp.connect(g); g.connect(this.out);
-      this.env(g.gain, t, 0.07, 0.05 * vel, dur - 0.07, 0.45);
+      this.env(g.gain, t, 0.12, 0.07 * vel, dur - 0.12, 0.8);
     }
-    stab(f, t, dur, vel) { // cuivres brefs et éclatants
-      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 2600, 1);
-      for (const det of [-7, 7]) { const o = this.osc('sawtooth', f, t, 0.5); o.detune.value = det; o.connect(lp); }
+    /* Accent de cuivres (sforzando adouci). */
+    stab(f, t, dur, vel) {
+      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 1600, 0.5);
+      this.ensemble(this.w.horn, f, t, t + 1.2, lp, { voices: 3, detune: 9, width: 0.5 });
       lp.connect(g); g.connect(this.out);
-      this.env(g.gain, t, 0.02, 0.05 * vel, 0.08, 0.25);
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.05 * vel, t + 0.04);
+      g.gain.setTargetAtTime(0.0001, t + 0.12, 0.18);
     }
     bass(f, t, dur, vel) {
-      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 520, 0.7);
-      const o = this.osc('sawtooth', f, t, dur + 0.6), s = this.osc('sine', f, t, dur + 0.6), sg = c.createGain(); sg.gain.value = 0.8;
-      o.connect(lp); s.connect(sg); sg.connect(lp); lp.connect(g); g.connect(this.out);
-      this.env(g.gain, t, 0.06, 0.06 * vel, dur - 0.06, 0.4);
+      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 420, 0.4);
+      this.ensemble(this.w.cello, f, t, t + dur + 2, lp, { voices: 2, detune: 6, vib: 3, width: 0.2 });
+      lp.connect(g); g.connect(this.out);
+      this.env(g.gain, t, U_clamp(dur * 0.2, 0.08, 0.35), 0.075 * vel, dur - 0.1, 1.0);
     }
+    /* Timbales : partiels inharmoniques d'une membrane + maillet. */
     timp(f, t, dur, vel) {
-      const c = this.c, g = c.createGain();
-      const o = this.osc('sine', f * 1.02, t, 2.2); o.frequency.exponentialRampToValueAtTime(f, t + 0.12);
-      const o2 = this.osc('sine', f * 1.51, t, 1.2), g2 = c.createGain(); g2.gain.value = 0.3;
-      o.connect(g); o2.connect(g2); g2.connect(g);
-      const n = c.createBufferSource(); n.buffer = this.s.brown; n.start(t, R() * 3, 0.15);
-      const nl = this.filt('lowpass', 400), ng = c.createGain(); n.connect(nl); nl.connect(ng); ng.connect(g);
-      this.env(ng.gain, t, 0.003, 0.6, 0.01, 0.1);
-      g.connect(this.out);
-      this.env(g.gain, t, 0.004, 0.32 * vel, 0.02, 1.6);
+      const c = this.c, out = c.createGain(); out.gain.value = 0.32 * vel;
+      [[1, 1, 1.9], [1.5, 0.45, 1.0], [1.99, 0.28, 0.7], [2.44, 0.16, 0.5], [2.9, 0.08, 0.35]].forEach(([r, a, d]) => {
+        const o = c.createOscillator(); o.frequency.setValueAtTime(f * r * 1.015, t); o.frequency.exponentialRampToValueAtTime(f * r, t + 0.15);
+        const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(a, t + 0.004); g.gain.setTargetAtTime(0.0001, t + 0.01, d / 4);
+        o.connect(g); g.connect(out); o.start(t); o.stop(t + d + 0.5);
+      });
+      const n = c.createBufferSource(); n.buffer = this.s.brown; n.start(t, R() * 3, 0.12);
+      const nl = this.filt('lowpass', 700), ng = c.createGain(); ng.gain.setValueAtTime(0.5, t); ng.gain.setTargetAtTime(0.0001, t + 0.01, 0.025);
+      n.connect(nl); nl.connect(ng); ng.connect(out);
+      out.connect(this.out);
     }
+    /* Corde pincée (harpe) : partiels légèrement inharmoniques, chacun avec sa décroissance. */
     harp(f, t, dur, vel) {
-      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 3800);
-      const o = this.osc('triangle', f, t, 2.2), o2 = this.osc('sine', f * 2, t, 1.4), g2 = c.createGain(); g2.gain.value = 0.25;
-      o.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g); g.connect(this.out);
-      this.env(g.gain, t, 0.003, 0.06 * vel, 0.01, 1.8);
+      const c = this.c, out = c.createGain(), lp = this.filt('lowpass', 4200, 0.3);
+      const p = this.pan(rr(-0.4, 0.4));
+      for (let k = 1; k <= 5; k++) {
+        const o = c.createOscillator(); o.frequency.value = f * k * (1 + 0.0006 * k * k);
+        const g = c.createGain(), d = 2.4 / Math.pow(k, 0.9);
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(1 / Math.pow(k, 1.45), t + 0.003); g.gain.setTargetAtTime(0.0001, t + 0.005, d / 4);
+        o.connect(g); g.connect(lp); o.start(t); o.stop(t + d + 0.3);
+      }
+      out.gain.value = 0.05 * vel;
+      lp.connect(out);
+      if (p) { out.connect(p); p.connect(this.out); } else out.connect(this.out);
     }
+    /* Célesta / piano feutré : partiels de cloche douce. */
     celesta(f, t, dur, vel) {
-      const c = this.c, g = c.createGain();
-      const o = this.osc('sine', f, t, 2.4), o2 = this.osc('sine', f * 4.01, t, 1.2), o3 = this.osc('sine', f * 2, t, 1.6), g2 = c.createGain(), g3 = c.createGain();
-      g2.gain.value = 0.18; g3.gain.value = 0.2;
-      o.connect(g); o2.connect(g2); g2.connect(g); o3.connect(g3); g3.connect(g); g.connect(this.out);
-      this.env(g.gain, t, 0.004, 0.06 * vel, 0.02, 2.1);
+      const c = this.c, out = c.createGain(), p = this.pan(rr(-0.3, 0.3));
+      [[1, 1, 2.6], [2, 0.32, 1.6], [3.01, 0.12, 1.1], [4.03, 0.1, 0.7], [6.98, 0.03, 0.4]].forEach(([r, a, d]) => {
+        const o = c.createOscillator(); o.frequency.value = f * r;
+        const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(a, t + 0.004); g.gain.setTargetAtTime(0.0001, t + 0.006, d / 4);
+        o.connect(g); g.connect(out); o.start(t); o.stop(t + d + 0.3);
+      });
+      out.gain.value = 0.045 * vel;
+      if (p) { out.connect(p); p.connect(this.out); } else out.connect(this.out);
     }
     flute(f, t, dur, vel) {
-      const c = this.c, g = c.createGain();
-      const o = this.osc('sine', f, t, dur + 0.5), o2 = this.osc('triangle', f, t, dur + 0.5), g2 = c.createGain(); g2.gain.value = 0.25;
-      this.vibrato(o.frequency, f, t, dur + 0.5, 0.005, 0.25);
-      o.connect(g); o2.connect(g2); g2.connect(g);
-      const n = c.createBufferSource(); n.buffer = this.s.white; n.loop = true; n.start(t, R() * 3); n.stop(t + dur + 0.5);
-      const nb = this.filt('bandpass', f * 2, 2), ng = c.createGain(); ng.gain.value = 0.06;
-      n.connect(nb); nb.connect(ng); ng.connect(g);
-      g.connect(this.out);
-      this.env(g.gain, t, 0.07, 0.055 * vel, dur - 0.07, 0.25);
+      const c = this.c, g = c.createGain(), lp = this.filt('lowpass', 5000, 0.3);
+      this.ensemble(this.w.flute, f, t, t + dur + 1, lp, { voices: 2, detune: 4, vib: 9, vibDelay: 0.35, width: 0.25 });
+      const n = c.createBufferSource(); n.buffer = this.s.white; n.loop = true; n.start(t, R() * 3); n.stop(t + dur + 1);
+      const nb = this.filt('bandpass', f * 2.2, 1.5), ng = c.createGain(); ng.gain.value = 0.035;
+      n.connect(nb); nb.connect(ng); ng.connect(lp);
+      lp.connect(g); g.connect(this.out);
+      this.env(g.gain, t, 0.1, 0.06 * vel, dur - 0.1, 0.5);
     }
     choir(f, t, dur, vel, m, vowel) {
-      const c = this.c, g = c.createGain();
-      const F = vowel === 'o' ? [[450, 6, 1], [800, 8, 0.5], [2830, 12, 0.15]] : [[800, 6, 1], [1150, 8, 0.6], [2900, 12, 0.2]];
-      const src = c.createGain();
-      for (const det of [-10, 0, 9]) { const o = this.osc('sawtooth', f, t, dur + 1.6); o.detune.value = det + rr(-3, 3); this.vibrato(o.frequency, f, t, dur + 1.6, 0.004, 0.6); o.connect(src); }
+      const c = this.c, g = c.createGain(), src = c.createGain();
+      const F = vowel === 'o' ? [[450, 3, 1], [800, 4, 0.55], [2830, 6, 0.12]] : [[780, 3, 1], [1150, 4, 0.6], [2900, 6, 0.15]];
+      this.ensemble(this.w.choir, f, t, t + dur + 2.2, src, { voices: 4, detune: 14, vib: 6, vibDelay: 0.8, width: 0.8, stagger: 0.08 });
       for (const [ff, q, a] of F) { const bp = this.filt('bandpass', ff, q), bg = c.createGain(); bg.gain.value = a; src.connect(bp); bp.connect(bg); bg.connect(g); }
       g.connect(this.out);
-      const a = Math.min(0.9, dur * 0.4);
-      this.env(g.gain, t, a, 0.11 * vel, dur - a, 1.3);
+      const a = U_clamp(dur * 0.45, 0.5, 1.6);
+      this.env(g.gain, t, a, 0.12 * vel, dur - a, 2.2);
     }
-    swell(f, t, dur, vel) { // cymbale suspendue en crescendo
-      const c = this.c, n = c.createBufferSource(); n.buffer = this.s.white; n.loop = true; n.start(t, R() * 3); n.stop(t + dur + 1.5);
-      const hp = this.filt('highpass', 5500), g = c.createGain();
-      n.connect(hp); hp.connect(g); g.connect(this.out);
-      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06 * vel, t + dur); g.gain.exponentialRampToValueAtTime(0.0001, t + dur + 1.4);
+    swell(f, t, dur, vel) { // cymbale suspendue frottée
+      const c = this.c, n = c.createBufferSource(); n.buffer = this.s.white; n.loop = true; n.start(t, R() * 3); n.stop(t + dur + 3);
+      const hp = this.filt('highpass', 6000), pk = this.filt('peaking', 9000, 1); pk.gain.value = 4;
+      const g = c.createGain();
+      n.connect(hp); hp.connect(pk); pk.connect(g); g.connect(this.out);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03 * vel, t + dur); g.gain.setTargetAtTime(0.0001, t + dur, 0.8);
     }
   }
+  const U_clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
   /* ------------------------------------------------------------------
      Arrangeur : orchestre une partition selon le style
@@ -255,30 +318,29 @@ window.DZ = window.DZ || {};
           for (const n of voices) add(b0, 'strings', n, bpb, (sec.lead === 'tutti' ? 0.75 : 0.55) * soft);
           add(b0, 'bass', bassN, bpb / 2, 0.8 * soft); add(b0 + bpb / 2, 'bass', bassN + (i % 2 ? 7 : 0), bpb / 2, 0.7 * soft);
           if (i % 4 === 0 || sec.lead === 'tutti') add(b0, 'timp', place(ch.root, 41), 1, 0.7 * soft);
-          if (i % 4 === 3) for (let k = 0; k < 8; k++) add(b0 + 2 + k * 0.25, 'timp', place(ch.root, 41), 0.25, 0.15 + k * 0.06);
-          if (sec.harp) for (let k = 0; k < 8; k++) add(b0 + k * 0.5, 'harp', place(ch.pcs[k % ch.pcs.length], 62 + (k > 3 ? 12 : 0)), 0.5, 0.6);
+          if (i % 4 === 3) add(b0, 'swell', 60, bpb, 0.5 * soft);
+          if (sec.harp) for (let k = 0; k < 6; k++) add(b0 + k * 0.66, 'harp', place(ch.pcs[k % ch.pcs.length], 62 + (k > 2 ? 12 : 0)), 0.7, 0.45);
           if (sec.lead === 'tutti') add(b0, 'horn', place(ch.root, 50), bpb, 0.45);
         } else if (st === 'pastoral') {
           const arp = [0, 2, 1, 2, 3, 2, 1, 2];
-          for (let k = 0; k < 8; k++) { const pc = ch.pcs[arp[k] % ch.pcs.length]; add(b0 + k * 0.5, 'harp', place(pc, k === 4 ? 67 : 55 + (arp[k] > 1 ? 7 : 0)), 0.5, 0.7); }
+          for (let k = 0; k < 8; k++) { const pc = ch.pcs[arp[k] % ch.pcs.length]; add(b0 + k * 0.5, 'harp', place(pc, k === 4 ? 67 : 55 + (arp[k] > 1 ? 7 : 0)), 0.5, k % 2 ? 0.35 : 0.55); }
           for (const n of voices) add(b0, 'strings', n + 12, bpb, 0.3);
           add(b0, 'bass', bassN, 2, 0.5); add(b0 + 2, 'bass', bassN, 2, 0.4);
         } else if (st === 'adventure') {
           const pat = [0, 0, 7, 0, 3, 0, 7, 12];
-          for (let k = 0; k < 8; k++) add(b0 + k * 0.5, 'stacc', place(ch.root, 50) + (pat[k] === 3 ? (ch.pcs[1] - ch.root + 12) % 12 : pat[k]), 0.5, k % 2 ? 0.6 : 0.9);
-          for (let k = 0; k < 4; k++) add(b0 + k, 'bass', bassN, 0.5, k % 2 ? 0.55 : 0.8);
-          add(b0, 'timp', place(ch.root, 41), 1, 0.75); add(b0 + 2, 'timp', place(ch.root, 41), 1, 0.55);
-          add(b0 + 3.5, 'timp', place(ch.root, 41) + 7, 0.5, 0.45);
-          if (i % 4 === 3) for (const n of voices) add(b0 + 3, 'stab', n + 12, 0.5, 0.7);
-          for (const n of voices) add(b0, 'strings', n + 12, bpb, 0.25);
+          for (let k = 0; k < 8; k++) add(b0 + k * 0.5, 'stacc', place(ch.root, 50) + (pat[k] === 3 ? (ch.pcs[1] - ch.root + 12) % 12 : pat[k]), 0.5, k % 2 ? 0.35 : 0.6);
+          add(b0, 'bass', bassN, 2, 0.75); add(b0 + 2, 'bass', bassN, 2, 0.6);
+          if (i % 2 === 0) add(b0, 'timp', place(ch.root, 41), 1, 0.6);
+          if (i % 4 === 3) { for (const n of voices.slice(1)) add(b0 + 2, 'stab', n + 12, 1, 0.45); add(b0, 'swell', 60, bpb, 0.45); }
+          for (const n of voices) add(b0, 'strings', n + 12, bpb, 0.4);
         } else if (st === 'night') {
           for (const n of voices.slice(0, 3)) add(b0, 'choir', n + 12, bpb, 0.5, 'o');
           add(b0, 'bass', bassN, bpb, 0.35);
           add(b0, 'harp', place(ch.root, 50), 1, 0.4); add(b0 + 2, 'harp', place(ch.pcs[2 % ch.pcs.length], 57), 1, 0.3);
         } else if (st === 'tension') {
-          for (let k = 0; k < 8; k++) add(b0 + k * 0.5, 'stacc', place(ch.root, 43) + ([0, 0, 3, 0, 6, 0, 5, 0][k]), 0.5, k % 2 ? 0.5 : 0.95);
-          add(b0 + 1.5, 'stab', place(ch.pcs[0], 60), 0.4, 0.8); add(b0 + 3, 'stab', place(ch.pcs[1], 60), 0.4, 0.8); add(b0 + 3, 'stab', place(ch.pcs[0], 60) + 1, 0.4, 0.5);
-          for (let k = 0; k < 4; k++) add(b0 + k, 'timp', place(ch.root, 41), 0.5, k === 0 ? 0.8 : 0.4);
+          for (let k = 0; k < 8; k++) add(b0 + k * 0.5, 'stacc', place(ch.root, 43) + ([0, 0, 3, 0, 6, 0, 5, 0][k]), 0.5, k % 2 ? 0.4 : 0.75);
+          add(b0 + 3, 'stab', place(ch.pcs[1], 60), 1, 0.55); add(b0 + 3, 'stab', place(ch.pcs[0], 60) + 1, 1, 0.35);
+          add(b0, 'timp', place(ch.root, 41), 1, 0.7); add(b0 + 2.5, 'timp', place(ch.root, 41), 0.5, 0.35);
           for (const n of voices) add(b0, 'strings', n, bpb, 0.35);
           add(b0, 'bass', bassN, bpb, 0.7);
         } else if (st === 'wonder') {
@@ -286,7 +348,7 @@ window.DZ = window.DZ || {};
           add(b0, 'bass', bassN, bpb, 0.6);
           if (i === 0) for (let k = 0; k < 14; k++) add(b0 + k * 0.08, 'harp', place(ch.pcs[k % ch.pcs.length], 55 + Math.floor(k / 3) * 12 / 3 * 3), 0.2, 0.6);
           if (i === 3) add(b0, 'swell', 60, bpb, 1);
-          if (i === sec.chords.length - 1) for (let k = 0; k < 10; k++) add(b0 + 2 + k * 0.2, 'timp', place(ch.root, 41), 0.2, 0.2 + k * 0.05);
+          if (i === sec.chords.length - 1) add(b0, 'timp', place(ch.root, 41), 1, 0.5);
         }
       });
       if (sec.swellIn && bar > 0) add(start - bpb, 'swell', 60, bpb, 0.8);
@@ -299,7 +361,7 @@ window.DZ = window.DZ || {};
         else if (lead === 'flute') add(start + n.b, 'flute', n.m, n.d, 0.9);
         else if (lead === 'celesta') { add(start + n.b, 'celesta', n.m, n.d, 0.8); }
       }
-      if (sec.roll) for (let k = 0; k < 12; k++) add(start + 4 + k * 0.25, 'timp', 46, 0.25, 0.15 + k * 0.05);
+      if (sec.roll) { add(start + 2, 'swell', 60, 4, 0.7); add(start + 6, 'timp', 46, 1, 0.6); }
       bar += sec.chords.length;
     }
     ev.sort((a, b) => a.b - b.b);
@@ -402,7 +464,6 @@ window.DZ = window.DZ || {};
           if (t > now - 0.05 && !p.fading) {
             const hum = rr(-0.012, 0.012);
             p.orch.play(e.inst, e.m, Math.max(now, t + hum), e.d * p.spb, e.v * rr(0.9, 1.05), e.extra);
-            if (e.extra) p.orch.choir(mtof(e.m), Math.max(now, t), e.d * p.spb, e.v, e.m, e.extra);
           }
           p.idx++;
         }
@@ -421,13 +482,7 @@ window.DZ = window.DZ || {};
       }
     }
   }
-  // le chœur est joué par l'instrument « choir » via extra (voyelle)
-  Orchestra.prototype.play = function (inst, m, t, dur, vel, extra) {
-    if (inst === 'choir') return; // planifié séparément avec sa voyelle
-    const fn = this[inst];
-    if (fn) fn.call(this, mtof(m), t, dur, vel, m, extra);
-  };
-
   DZ.Music = Music;
   DZ.MUSIC_THEMES = THEMES;
+  DZ._music = { Orchestra, arrange };
 })();

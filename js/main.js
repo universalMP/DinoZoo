@@ -40,7 +40,6 @@ window.DZ = window.DZ || {};
     sound.muted = !!st.muted;
     if (st.vol) Object.assign(sound.vol, st.vol);
     sound.musicOn = st.musicOn !== false;
-    renderer.onFoot = (x, y, z, size) => sound.footstep(x, y, z, size);
     document.getElementById('btn-sound').textContent = st.muted ? '🔇' : '🔊';
     const ui = new DZ.UI(game, renderer, sound);
     ui.quality = quality;

@@ -18,7 +18,7 @@ Construisez des chemins depuis l'entrée, des enclos reliés à ces chemins, pui
 - **3 niveaux** pour chaque enclos, boutique, restaurant et toilettes.
 - Événements aléatoires : affluence, orages, maladies, critiques, mécènes… et évasions si vos clôtures sont trop faibles.
 - Cycle jour et nuit, météo.
-- **Son 3D haut de gamme**, entièrement synthétisé : voix propres à chaque espèce, pas qui font trembler le sol, vent, pluie et tonnerre, vagues, rivière, oiseaux, insectes, foule de visiteurs.
+- **Son 3D haut de gamme**, entièrement synthétisé : voix propres à chaque espèce, pluie, vent et tonnerre d'orage, vagues, rivière, oiseaux, insectes, foule de visiteurs.
 - **Six thèmes musicaux orchestraux originaux** qui suivent le moment de la journée et les événements (🎵 pour couper la musique, volumes dans le menu ☰).
 
 ## Commandes

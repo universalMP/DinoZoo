@@ -515,7 +515,7 @@
         out.push([leg.foot, lm]);
         if (moving && side > 0 && C.dinos[d.sp].space >= 4) {
           const f = Math.sin(psi) > 0;
-          if (st.foot !== f) { st.foot = f; if (this.onFoot && C.dinos[d.sp].space >= 4) this.onFoot(x, gy, z, Math.sqrt(C.dinos[d.sp].space) * 0.9); if (Math.random() < 0.7) this.addP({ k: 'dust', x: x + (Math.random() - 0.5) * 0.2, y: gy + 0.02, z: z + (Math.random() - 0.5) * 0.2, vx: (Math.random() - 0.5) * 0.2, vy: 0.05, vz: (Math.random() - 0.5) * 0.2, life: 0, max: 1.1, s: 0.18 + C.dinos[d.sp].space * 0.02 }); }
+          if (st.foot !== f) { st.foot = f; if (Math.random() < 0.7) this.addP({ k: 'dust', x: x + (Math.random() - 0.5) * 0.2, y: gy + 0.02, z: z + (Math.random() - 0.5) * 0.2, vx: (Math.random() - 0.5) * 0.2, vy: 0.05, vz: (Math.random() - 0.5) * 0.2, life: 0, max: 1.1, s: 0.18 + C.dinos[d.sp].space * 0.02 }); }
         }
       }
       if (rig.arm) for (const side of [-1, 1]) {

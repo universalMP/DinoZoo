@@ -382,57 +382,96 @@
      Enclos : clôtures, volières, lagons, décor intérieur
      opaque : maillage opaque ; glass : maillage transparent
      ------------------------------------------------------------------ */
+  /* Contour organique de l'enclos (distance signée = offset), rééchantillonné
+     tous les « spacing » ; points en coordonnées locales à l'emprise. */
+  G.encContour = function (b, offset, spacing) {
+    const sh = DZ.encShape(b);
+    const raw = [];
+    const N = 160;
+    for (let k = 0; k < N; k++) {
+      const a = k / N * TAU;
+      const dx = Math.cos(a) * sh.hw, dz = Math.sin(a) * sh.hh, l = Math.hypot(dx, dz);
+      const ux = dx / l, uz = dz / l;
+      let lo = 0, hi = Math.max(sh.hw, sh.hh) + 2;
+      for (let it = 0; it < 22; it++) { const m = (lo + hi) / 2; if (DZ.encSDF(b, sh.cx + ux * m, sh.cy + uz * m, sh) < offset) lo = m; else hi = m; }
+      raw.push([sh.cx + ux * lo - b.x, sh.cy + uz * lo - b.y]);
+    }
+    // rééchantillonnage à pas constant
+    let total = 0;
+    const seg = raw.map((p, i) => { const q = raw[(i + 1) % N]; const l = Math.hypot(q[0] - p[0], q[1] - p[1]); total += l; return l; });
+    const n = Math.max(8, Math.round(total / spacing));
+    const out = [];
+    let i = 0, acc = 0;
+    for (let k = 0; k < n; k++) {
+      const target = k / n * total;
+      while (acc + seg[i] < target) { acc += seg[i]; i = (i + 1) % N; }
+      const t = seg[i] ? (target - acc) / seg[i] : 0, p = raw[i], q = raw[(i + 1) % N];
+      out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+    }
+    return out;
+  };
+
+  /* Suit une polyligne fermée : fn(x, z, angle, longueur, index, normale). */
+  function alongLoop(pts, fn) {
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      const len = Math.hypot(q[0] - p[0], q[1] - p[1]), ang = Math.atan2(q[1] - p[1], q[0] - p[0]);
+      // normale extérieure (contour parcouru dans le sens trigonométrique de l'écran)
+      fn(p[0], p[1], ang, len, i, [Math.sin(ang), -Math.cos(ang)], q);
+    }
+  }
+
   G.enclosureInto = function (mb, glass, b, world) {
     const def = C.buildings[b.type], lv = b.level, W = b.w, D = b.h;
     const out = { lights: [], smoke: [] };
-    const edges = [[0, 0, W, 0], [W, 0, W, D], [W, D, 0, D], [0, D, 0, 0]];
     if (def.kind === 'air') return aviary(mb, glass, b, out);
     if (def.kind === 'water') return lagoon(mb, glass, b, out);
-    for (const [ax, az, bx, bz] of edges) {
-      const len = Math.hypot(bx - ax, bz - az);
-      const ang = Math.atan2(bz - az, bx - ax);
-      mb.push().t(ax, 0, az).ry(-ang);
+    const spacing = lv === 1 ? 0.34 : lv === 2 ? 0.5 : 0.62;
+    const pts = G.encContour(b, -0.05, spacing);
+    const sh = DZ.encShape(b);
+    const front = [];
+    alongLoop(pts, (x, z, ang, len, i, nrm, q) => {
+      mb.push().t(x, 0, z).ry(-ang);
       if (lv === 1) {
-        const n = Math.max(2, Math.round(len / 0.33));
-        mb.material('wood');
-        for (let i = 0; i <= n; i++) mb.col(i % 2 ? '#8a6240' : '#7a5636').push().t(len * i / n, 0, 0).cyl(0.03, 0.026, 0.34, 6).pop();
+        mb.material('wood').col(i % 2 ? '#8a6240' : '#7a5636').push().rz((U.hash(i, 3, b.seed) - 0.5) * 0.08).cyl(0.03, 0.026, 0.32 + U.hash(i, 1, b.seed) * 0.05, 6).pop();
         mb.col('#6e4c30');
-        for (const y of [0.12, 0.27]) mb.push().t(len / 2, y, 0).box(len, 0.035, 0.03).pop();
+        for (const y of [0.12, 0.27]) mb.push().t(len / 2, y + (U.hash(i, y * 10, b.seed) - 0.5) * 0.02, 0).box(len + 0.02, 0.032, 0.028).pop();
       } else if (lv === 2) {
-        mb.material('stone').col('#9a968c').push().t(len / 2, 0, 0).box(len, 0.05, 0.1).pop();
-        const n = Math.max(2, Math.round(len / 0.5));
-        for (let i = 0; i <= n; i++) {
-          mb.material('metal').col('#6e767c').push().t(len * i / n, 0, 0).box(0.05, 0.66, 0.05).pop();
-          mb.col('#2f3438').push().t(len * i / n, 0.66, 0).box(0.09, 0.03, 0.09).pop();
-          if (i % 3 === 1) { mb.material('emissive').col('#ffe2a0').push().t(len * i / n, 0.7, 0).sphere(0.025, 0.025, 0.025, 5, 3).pop(); }
-          if (i % 2 === 1) { mb.push().t(len * i / n + 0.12, 0.3, 0.035); sign(mb, 0.16, 0.08, '⚡ DANGER', 0.01); mb.pop(); }
-        }
+        mb.material('stone').col('#9a968c').push().t(len / 2, 0, 0).box(len + 0.04, 0.05, 0.1).pop();
+        mb.material('metal').col('#6e767c').push().box(0.05, 0.66, 0.05).pop();
+        mb.col('#2f3438').push().t(0, 0.66, 0).box(0.09, 0.03, 0.09).pop();
+        if (i % 3 === 1) mb.material('emissive').col('#ffe2a0').push().t(0, 0.7, 0).sphere(0.025, 0.025, 0.025, 5, 3).pop();
+        if (i % 4 === 2) { mb.push().t(len / 2, 0.3, 0.035); sign(mb, 0.16, 0.08, '⚡ DANGER', 0.01); mb.pop(); }
         mb.material('metal').col('#30363a');
-        for (let k = 0; k < 5; k++) mb.push().t(len / 2, 0.1 + k * 0.12, 0).box(len, 0.008, 0.008).pop();
+        for (let k = 0; k < 5; k++) mb.push().t(len / 2, 0.1 + k * 0.12, 0).box(len + 0.02, 0.008, 0.008).pop();
+        if (i % 3 === 1) out.lights.push([b.x + x, 0.75, b.y + z, 1.5]);
       } else {
-        mb.material('stone').col('#a8a49a').push().t(len / 2, 0, 0).box(len, 0.13, 0.12).pop();
-        mb.col('#c6c2b8').push().t(len / 2, 0.13, 0).box(len, 0.015, 0.14).pop();
-        const n = Math.max(2, Math.round(len / 0.66));
-        for (let i = 0; i <= n; i++) mb.material('metal').col('#3f454a').push().t(len * i / n, 0.13, 0).box(0.04, 0.5, 0.04).pop();
-        mb.material('metal').col('#3f454a').push().t(len / 2, 0.62, 0).box(len, 0.025, 0.05).pop();
-        glass.material('glass').col('#bfe0ea');
-        glass.push(); glass.m = G.m4.copy(mb.m); glass.face([0, 0.14, 0], [len, 0.14, 0], [len, 0.62, 0], [0, 0.62, 0]); glass.pop();
+        mb.material('stone').col('#a8a49a').push().t(len / 2, 0, 0).box(len + 0.03, 0.13, 0.12).pop();
+        mb.col('#c6c2b8').push().t(len / 2, 0.13, 0).box(len + 0.03, 0.015, 0.14).pop();
+        mb.material('metal').col('#3f454a').push().t(0, 0.13, 0).box(0.04, 0.5, 0.04).pop();
+        mb.push().t(len / 2, 0.62, 0).box(len + 0.02, 0.025, 0.05).pop();
+        glass.push(); glass.m = G.m4.copy(mb.m); glass.material('glass').col('#bfe0ea').face([0, 0.14, 0], [len, 0.14, 0], [len, 0.62, 0], [0, 0.62, 0]); glass.pop();
+        if (nrm[1] > 0.55) front.push([x, z, ang, len, nrm]);
       }
       mb.pop();
+    });
+    // passerelle d'observation qui épouse la courbe de la clôture (niveau 3)
+    for (const [x, z, ang, len, nrm] of front) {
+      const ox = x + nrm[0] * 0.28, oz = z + nrm[1] * 0.28;
+      mb.push().t(ox, 0, oz).ry(-ang);
+      mb.material('wood').col('#8a6545').push().t(len / 2, 0.36, 0).box(len + 0.06, 0.04, 0.3).pop();
+      mb.material('metal').col('#3f454a').push().t(0, 0, 0.1).box(0.035, 0.36, 0.035).pop();
+      mb.push().t(len / 2, 0.62, 0.14).box(len + 0.04, 0.02, 0.02).pop();
+      mb.push().t(0, 0.4, 0.14).box(0.012, 0.22, 0.012).pop();
+      mb.pop();
     }
-    // passerelle d'observation (niveau 3, côté avant, hors de l'enclos)
-    if (lv === 3) {
-      mb.material('wood').col('#8a6545').push().t(W / 2, 0.36, D + 0.18).box(W - 0.2, 0.04, 0.28).pop();
-      mb.material('metal').col('#3f454a');
-      for (let x = 0.3; x < W; x += 0.9) mb.push().t(x, 0, D + 0.3).box(0.04, 0.36, 0.04).pop();
-      mb.push().t(W / 2, 0.62, D + 0.31).box(W - 0.2, 0.02, 0.02).pop();
-      for (let x = 0.2; x < W - 0.1; x += 0.2) mb.push().t(x, 0.4, D + 0.31).box(0.012, 0.22, 0.012).pop();
-      for (let x = 0.6; x < W; x += 1.6) out.lights.push([b.x + x, 0.7, b.y + D + 0.3, 1.4]);
-    }
-    if (lv === 2) for (let x = 0.5; x < W; x += 1.5) out.lights.push([b.x + x, 0.75, b.y, 1.5], [b.x + x, 0.75, b.y + D, 1.5]);
-    // mangeoire
-    mb.material('wood').col('#5a4028').push().t(W - 0.6, 0, D - 0.45).box(0.42, 0.1, 0.16).pop();
-    mb.material('plain').col('#b8a050').push().t(W - 0.6, 0.1, D - 0.45).box(0.38, 0.03, 0.12).pop();
+    if (front.length) for (let k = 0; k < front.length; k += 4) out.lights.push([b.x + front[k][0], 0.7, b.y + front[k][1] + 0.3, 1.4]);
+    // mangeoire à l'intérieur
+    const fx = sh.cx - b.x + sh.hw * 0.45, fz = sh.cy - b.y + sh.hh * 0.45;
+    mb.push().t(fx, 0, fz).ry(0.4);
+    mb.material('wood').col('#5a4028').box(0.42, 0.1, 0.16);
+    mb.material('plain').col('#b8a050').push().t(0, 0.1, 0).box(0.38, 0.03, 0.12).pop();
+    mb.pop();
     return out;
   };
 
@@ -469,48 +508,35 @@
   }
 
   function lagoon(mb, glass, b, out) {
-    const lv = b.level, W = b.w, D = b.h;
+    const lv = b.level;
     if (lv === 1) {
-      const r = U.rng(b.seed);
-      for (let i = 0; i < 26; i++) {
-        const t = i / 26, side = Math.floor(t * 4), f = (t * 4) % 1;
-        const x = side === 0 ? f * W : side === 1 ? W - 0.5 : side === 2 ? (1 - f) * W : 0.5;
-        const z = side === 0 ? 0.55 : side === 1 ? f * D : side === 2 ? D - 0.5 : (1 - f) * D;
-        G.rockInto(mb, U.clamp(x, 0.5, W - 0.5), -0.05, U.clamp(z, 0.5, D - 0.5), r() < 0.3 ? 'M' : 'S', b.seed + i);
-      }
+      // berge naturelle : rochers le long du bassin
+      const pts = G.encContour(b, -0.35, 0.55);
+      pts.forEach((p, i) => G.rockInto(mb, p[0], -0.06, p[1], U.hash(i, 2, b.seed) < 0.3 ? 'M' : 'S', b.seed + i));
       return out;
     }
-    // margelle en béton
-    mb.material('stone').col('#bdb8ac');
-    mb.push().t(W / 2, -0.02, 0.92).box(W - 1.6, 0.06, 0.12).pop();
-    mb.push().t(W / 2, -0.02, D - 0.92).box(W - 1.6, 0.06, 0.12).pop();
-    mb.push().t(0.92, -0.02, D / 2).box(0.12, 0.06, D - 1.6).pop();
-    mb.push().t(W - 0.92, -0.02, D / 2).box(0.12, 0.06, D - 1.6).pop();
-    // parois intérieures du bassin
-    mb.material('stone').col('#7a8a88');
-    const inner = (x0, z0, x1, z1) => mb.face([x0, -0.36, z0], [x1, -0.36, z1], [x1, 0.0, z1], [x0, 0.0, z0]);
-    inner(1, 1, W - 1, 1); inner(W - 1, D - 1, 1, D - 1); inner(1, D - 1, 1, 1); inner(W - 1, 1, W - 1, D - 1);
-    // garde-corps
-    const rail = (x0, z0, x1, z1) => {
-      const len = Math.hypot(x1 - x0, z1 - z0), ang = Math.atan2(z1 - z0, x1 - x0);
-      mb.push().t(x0, 0, z0).ry(-ang).material('metal').col('#3f454a');
-      mb.push().t(len / 2, 0.34, 0).box(len, 0.025, 0.025).pop();
-      mb.push().t(len / 2, 0.18, 0).box(len, 0.012, 0.012).pop();
-      for (let i = 0; i <= Math.round(len / 0.4); i++) mb.push().t(i * len / Math.round(len / 0.4), 0, 0).box(0.02, 0.34, 0.02).pop();
-      if (lv === 3) { glass.push(); glass.m = G.m4.copy(mb.m); glass.material('glass').col('#bfe0ea').face([0, 0.02, 0], [len, 0.02, 0], [len, 0.33, 0], [0, 0.33, 0]); glass.pop(); }
+    // margelle et garde-corps qui suivent la courbe du bassin
+    const pts = G.encContour(b, -0.32, 0.42);
+    alongLoop(pts, (x, z, ang, len, i) => {
+      mb.push().t(x, 0, z).ry(-ang);
+      mb.material('stone').col('#bdb8ac').push().t(len / 2, -0.03, 0).box(len + 0.04, 0.07, 0.22).pop();
+      mb.material('metal').col('#3f454a').push().box(0.02, 0.36, 0.02).pop();
+      mb.push().t(len / 2, 0.35, 0).box(len + 0.02, 0.025, 0.025).pop();
+      mb.push().t(len / 2, 0.19, 0).box(len + 0.02, 0.012, 0.012).pop();
+      if (lv === 3) { glass.push(); glass.m = G.m4.copy(mb.m); glass.material('glass').col('#bfe0ea').face([0, 0.02, 0], [len, 0.02, 0], [len, 0.34, 0], [0, 0.34, 0]); glass.pop(); }
+      if (lv === 3 && i % 6 === 0) out.lights.push([b.x + x, 0.4, b.y + z, 1.3]);
       mb.pop();
-    };
-    rail(0.6, 0.6, W - 0.6, 0.6); rail(W - 0.6, 0.6, W - 0.6, D - 0.6); rail(W - 0.6, D - 0.6, 0.6, D - 0.6); rail(0.6, D - 0.6, 0.6, 0.6);
-    if (lv === 3) for (let x = 1; x < W; x += 2) out.lights.push([b.x + x, 0.4, b.y + D - 0.6, 1.3]);
+    });
     return out;
   }
 
-  /* Décor intérieur des enclos (rochers et arbres), déterministe. */
+    /* Décor intérieur des enclos (rochers et arbres), déterministe. */
   G.enclosureDecor = function (b) {
     const def = C.buildings[b.type], lv = b.level;
     const r = U.rng(b.seed + lv * 7);
     const area = b.w * b.h, out = [];
-    const inside = () => ({ x: b.x + 0.7 + r() * (b.w - 1.4), z: b.y + 0.7 + r() * (b.h - 1.3) });
+    const sh = DZ.encShape(b);
+    const inside = () => { for (let k = 0; k < 30; k++) { const p = { x: b.x + 0.7 + r() * (b.w - 1.4), z: b.y + 0.7 + r() * (b.h - 1.3) }; if (DZ.encSDF(b, p.x, p.z, sh) < -0.9) return p; } return { x: sh.cx, z: sh.cy }; };
     if (def.kind === 'land') {
       const rocks = Math.round(area / 9) + (lv >= 2 ? 1 : 0);
       for (let i = 0; i < rocks; i++) { const p = inside(); out.push({ t: 'rock', x: p.x, z: p.z, size: r() < 0.3 && area > 12 ? 'L' : r() < 0.6 ? 'M' : 'S', sd: (r() * 1000) | 0 }); }

@@ -207,16 +207,22 @@ DZ.G = DZ.G || {};
         col *= 0.9 + 0.2 * n2;
         col = mix(col, col * vec3(1.15, 1.1, 0.75), smoothstep(0.7, 0.95, n3) * 0.5);
         col *= 0.93 + 0.12 * step(0.82, vnoise(vPos * 41.0));
-      } else if (mat == 3.0) { // dalles de pierre
-        vec2 g = vPos.xz * 2.6;
-        float row = floor(g.y);
-        g.x += mod(row, 2.0) * 0.5;
-        vec2 id = floor(g), f = fract(g);
-        float edge = min(min(f.x, 1.0 - f.x) * 1.4, min(f.y, 1.0 - f.y));
-        col *= 0.86 + 0.24 * hash3(vec3(id, 3.0));
-        col *= 0.9 + 0.18 * vnoise(vPos * 9.0);
-        col *= mix(0.55, 1.0, smoothstep(0.02, 0.08, edge));
-        spec = 0.06;
+      } else if (mat == 3.0) { // pavés irréguliers (cellules de Voronoï)
+        vec2 p = vPos.xz * 3.4 + vec2(vnoise(vPos * 1.7), vnoise(vPos * 1.9 + 7.0)) * 0.35;
+        vec2 ip = floor(p), fp = fract(p);
+        float d1 = 8.0, d2 = 8.0; vec2 id = ip;
+        for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+          vec2 gg = vec2(float(i), float(j));
+          vec2 o = vec2(hash3(vec3(ip + gg, 1.0)), hash3(vec3(ip + gg, 2.0))) * 0.85 + 0.075;
+          vec2 rr = gg + o - fp;
+          float dd = dot(rr, rr);
+          if (dd < d1) { d2 = d1; d1 = dd; id = ip + gg; } else if (dd < d2) d2 = dd;
+        }
+        float edge = sqrt(d2) - sqrt(d1);
+        col *= 0.82 + 0.3 * hash3(vec3(id, 3.0));
+        col *= 0.88 + 0.2 * vnoise(vPos * 11.0);
+        col = mix(col * vec3(0.55, 0.57, 0.48), col, smoothstep(0.035, 0.11, edge));
+        spec = 0.07;
       } else if (mat == 4.0) { // bois
         float s = sin((vLocal.x + vLocal.z) * 60.0 + vnoise(vLocal * 9.0) * 6.0);
         col *= 0.85 + 0.12 * s + 0.1 * vnoise(vLocal * 30.0);

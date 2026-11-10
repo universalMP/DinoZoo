@@ -465,7 +465,6 @@
           if (d.moving > 0 && C.dinos[d.sp].space >= 4) {
             const s = Math.sin(d.phase) > 0;
             const prev = self._footState.get(d.id);
-            if (prev !== undefined && prev !== s && self.onFoot) self.onFoot(d.x, 0, d.y, Math.sqrt(C.dinos[d.sp].space) * 0.9);
             if (prev !== undefined && prev !== s && Math.random() < 0.8) self.addP({ k: 'dust', x: x + (Math.random() - 0.5) * rig.len * 0.3, y: y + 1, vx: (Math.random() - 0.5) * 12, vy: -3, life: 0, max: 1.1, s: 3 + C.dinos[d.sp].space * 0.5 });
             self._footState.set(d.id, s);
           }

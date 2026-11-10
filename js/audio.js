@@ -69,13 +69,21 @@ window.DZ = window.DZ || {};
       this.outGain = c.createGain(); this.outGain.gain.value = 0.8;
       this.master.connect(this.comp); this.comp.connect(this.outGain); this.outGain.connect(c.destination);
       this.musicBus = c.createGain(); this.sfxBus = c.createGain(); this.ambBus = c.createGain(); this.uiBus = c.createGain();
-      for (const b of [this.musicBus, this.sfxBus, this.ambBus, this.uiBus]) b.connect(this.master);
+      for (const b of [this.sfxBus, this.ambBus, this.uiBus]) b.connect(this.master);
+      // musique : son direct adouci + grande salle de concert dédiée
+      this.musicTone = c.createBiquadFilter(); this.musicTone.type = 'lowpass'; this.musicTone.frequency.value = 6500; this.musicTone.Q.value = 0.4;
+      this.musicLow = c.createBiquadFilter(); this.musicLow.type = 'highpass'; this.musicLow.frequency.value = 45;
+      this.musicDry = c.createGain(); this.musicDry.gain.value = 0.62;
+      this.musicBus.connect(this.musicLow); this.musicLow.connect(this.musicTone); this.musicTone.connect(this.musicDry); this.musicDry.connect(this.master);
       // réverbération de salle
       this.reverb = c.createConvolver();
       this.reverb.buffer = this._impulse(3.2, 2.6);
       this.revOut = c.createGain(); this.revOut.gain.value = 0.9;
       this.reverb.connect(this.revOut); this.revOut.connect(this.master);
-      this.musicSend = c.createGain(); this.musicSend.gain.value = 0.42; this.musicBus.connect(this.musicSend); this.musicSend.connect(this.reverb);
+      this.hall = c.createConvolver(); this.hall.buffer = this._impulse(5.2, 2.7, 0.028);
+      this.hallOut = c.createGain(); this.hallOut.gain.value = 0.95;
+      this.musicSend = c.createGain(); this.musicSend.gain.value = 0.85;
+      this.musicTone.connect(this.musicSend); this.musicSend.connect(this.hall); this.hall.connect(this.hallOut); this.hallOut.connect(this.master);
       this.sfxSend = c.createGain(); this.sfxSend.gain.value = 0.22; this.sfxBus.connect(this.sfxSend); this.sfxSend.connect(this.reverb);
       this.ambSend = c.createGain(); this.ambSend.gain.value = 0.12; this.ambBus.connect(this.ambSend); this.ambSend.connect(this.reverb);
       // bruits
@@ -108,8 +116,9 @@ window.DZ = window.DZ || {};
     }
 
     /* Réponse impulsionnelle : premières réflexions + queue qui s'assombrit. */
-    _impulse(seconds, decay) {
+    _impulse(seconds, decay, predelay) {
       const c = this.ctx, len = Math.floor(c.sampleRate * seconds);
+      const pre = Math.floor(c.sampleRate * (predelay || 0));
       const buf = c.createBuffer(2, len, c.sampleRate);
       for (let ch = 0; ch < 2; ch++) {
         const d = buf.getChannelData(ch);
@@ -118,7 +127,7 @@ window.DZ = window.DZ || {};
           const t = i / c.sampleRate;
           const k = Math.min(0.95, 0.15 + t * 0.35);
           lp = lp * k + (R() * 2 - 1) * (1 - k);
-          d[i] = lp * Math.pow(1 - i / len, decay) * (t < 0.012 ? t / 0.012 : 1);
+          d[i] = i < pre ? 0 : lp * Math.pow(1 - i / len, decay) * (t - pre / c.sampleRate < 0.02 ? Math.max(0, (t - pre / c.sampleRate) / 0.02) : 1);
         }
         for (let e = 0; e < 9; e++) { const p = Math.floor(c.sampleRate * rr(0.008, 0.09)); d[p] += (R() < 0.5 ? -1 : 1) * rr(0.2, 0.55); }
       }
@@ -457,24 +466,6 @@ window.DZ = window.DZ || {};
       setTimeout(o.end, (dur + 1) * 1000);
     }
 
-    /* Pas lourds (taille 1 à 3). */
-    footstep(x, y, z, size) {
-      if (!this.ready()) return;
-      const o = this.out([x, y, z], { range: 45 + size * 15, ref: 3 + size * 2, hrtf: false });
-      if (!o) return;
-      const c = this.ctx, t = c.currentTime + 0.01;
-      const f = 70 / Math.sqrt(size);
-      const s = this._osc('sine', f, t, 0.5);
-      s.frequency.setValueAtTime(f * 1.5, t); s.frequency.exponentialRampToValueAtTime(f * 0.55, t + 0.3);
-      const env = c.createGain(); s.connect(env); env.connect(o.g);
-      this._env(env.gain, t, 0.004, 0.55 + size * 0.15, 0.02, 0.38);
-      const n = this._src(this.brown, t, 0.3), nl = this._filter('lowpass', 260), ng = c.createGain();
-      n.connect(nl); nl.connect(ng); ng.connect(o.g); this._env(ng.gain, t, 0.003, 0.4 + size * 0.1, 0.01, 0.2);
-      if (size >= 2.5) { const cr = this._src(this.white, t + 0.02, 0.15), cb = this._filter('bandpass', 1800, 1.5), cg = c.createGain(); cr.connect(cb); cb.connect(cg); cg.connect(o.g); this._env(cg.gain, t + 0.02, 0.005, 0.06, 0.02, 0.08); }
-      o.g.gain.value = 1;
-      setTimeout(o.end, 700);
-    }
-
     /* ------------------------------------------------------------------
        Ambiances continues
        ------------------------------------------------------------------ */
@@ -623,10 +614,10 @@ window.DZ = window.DZ || {};
         this.windLp.frequency.setTargetAtTime(U.clamp(260 + this.gust * 380 + storm * 500 + e.alt * 4, 200, 1400), now, 1.2);
         this.whistleBp.frequency.setTargetAtTime(rr(500, 1300), now, 1.5);
       }
-      const wind = U.clamp(e.wind * this.gust, 0, 1.5);
-      this.b.wind.gain.setTargetAtTime(0.1 + wind * 0.32, now, 0.8);
-      this.b.whistle.gain.setTargetAtTime(Math.max(0, wind - 0.6) * 0.05 + storm * 0.02, now, 1);
-      this.b.leaves.gain.setTargetAtTime((e.forest + e.jungle) * near * (0.015 + wind * wind * 0.05), now, 0.5);
+      // pas de vent permanent : il ne souffle que pendant l'orage
+      this.b.wind.gain.setTargetAtTime(storm * 0.3 * this.gust, now, 0.8);
+      this.b.whistle.gain.setTargetAtTime(storm * 0.015, now, 1);
+      this.b.leaves.gain.setTargetAtTime((e.forest + e.jungle) * near * storm * 0.05 * this.gust, now, 0.5);
       // vagues
       if (e.sea > 0.01 && now > this._nextWave) {
         const p = rr(5.5, 9);
