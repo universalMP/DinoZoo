@@ -2,7 +2,8 @@
    DinoZoo — Fichier de configuration
    ---------------------------------------------------------------------
    Toutes les valeurs d'équilibrage (prix, revenus, attractivité,
-   entretien, déblocages) et la palette de couleurs sont ici.
+   entretien, déblocages) et la lumière du jour sont ici. Les niveaux
+   de qualité graphique sont dans js/r3d/renderer3d.js (QUALITY).
    Modifiez ce fichier pour rééquilibrer le jeu sans toucher au code.
    ===================================================================== */
 window.DZ = window.DZ || {};
@@ -12,8 +13,7 @@ DZ.CONFIG = {
   map: {
     w: 192,           // largeur en cases (≈ 30 fois la surface de la première carte)
     h: 136,           // hauteur en cases
-    tile: 48,         // taille d'une case en pixels (zoom 1)
-    margin: 3,        // bordure de jungle dessinée autour de la carte
+    tile: 48,         // une case = 48 « pixels monde » (unité des coordonnées de l'interface)
     entrance: { x: 94, y: 134, w: 3, h: 2, tileX: 95, tileY: 133 }
   },
 
@@ -98,6 +98,10 @@ DZ.CONFIG = {
     boutique:   { cat: 'service', name: 'Boutique de souvenirs', w: 2, h: 2, cost: 1500, upgrade: [2500, 6000],  upkeep: [30, 50, 80],  spend: [8, 12, 18], chance: [0.5, 0.6, 0.72], attraction: [3, 5, 8], icon: '🛍️' },
     restaurant: { cat: 'service', name: 'Restaurant',            w: 3, h: 2, cost: 3500, upgrade: [5000, 11000], upkeep: [60, 90, 140], spend: [9, 14, 20], litter: [0.55, 0.4, 0.25], attraction: [4, 7, 11], icon: '🍽️' },
     toilettes:  { cat: 'service', name: 'Toilettes',             w: 2, h: 1, cost: 900,  upgrade: [1500, 3500],  upkeep: [15, 25, 40],  satisfaction: [8, 14, 22], attraction: [1, 2, 3], icon: '🚻' },
+    // aires de jeux : les enfants s'y amusent (satisfaction de toute la famille), sans dépense
+    balancoires: { cat: 'service', play: true, name: 'Balançoires',    w: 2, h: 2, cost: 700,  upgrade: [900, 2200],  upkeep: [8, 14, 22],  fun: [8, 11, 15],  kids: [2, 3, 4], attraction: [1.5, 2.5, 4], icon: '🧒' },
+    toboggan:    { cat: 'service', play: true, name: 'Toboggan',       w: 2, h: 3, cost: 1100, upgrade: [1400, 3200], upkeep: [10, 18, 28], fun: [10, 14, 19], kids: [2, 3, 4], attraction: [2, 3.5, 5],   icon: '🛝' },
+    fauxdino:    { cat: 'service', play: true, name: 'Dino à grimper', w: 3, h: 3, cost: 2400, upgrade: [3000, 6500], upkeep: [18, 30, 45], fun: [13, 18, 24], kids: [3, 4, 5], attraction: [3, 5, 8],     icon: '🦕' },
 
     poubelle:   { cat: 'deco', name: 'Poubelle',    w: 1, h: 1, cost: 60,   radius: 3, icon: '🗑️' },
     banc:       { cat: 'deco', name: 'Banc',        w: 1, h: 1, cost: 90,   pleasant: 2, attraction: 0.3, icon: '🪑' },
@@ -190,6 +194,37 @@ DZ.CONFIG = {
     minShared: 3              // longueur minimale du côté commun
   },
 
+  /* ---------- Passerelles d'observation (pour les visiteurs, au-dessus des enclos) ---------- */
+  skywalk: {
+    base: 1200,               // prix fixe (deux escaliers)
+    perTile: 340,             // par case au-dessus des enclos
+    maxLen: 20,               // longueur maximale au-dessus des enclos (cases)
+    height: 1.75,             // hauteur du tablier au-dessus du sol de l'enclos (3D, en cases)
+    view: 1.5,                // satisfaction gagnée en regardant les dinosaures d'en haut (× la vue depuis l'allée)
+    attraction: 0.15,         // attractivité des dinosaures survolés en plus (une fois par enclos)
+    appeal: 1.3               // les visiteurs préfèrent les enclos qu'on peut survoler
+  },
+
+  /* ---------- Aires de jeux ---------- */
+  play: {
+    rate: 16,                 // envie de jouer des enfants, par heure de jeu
+    seek: 55,                 // au-delà, la famille cherche une aire de jeux
+    hours: [0.35, 0.65],      // durée d'une partie de jeux
+    again: 18                 // une aire déjà essayée compte comme plus lointaine (cases)
+  },
+
+  /* ---------- Transfert d'un dinosaure vers un autre enclos ---------- */
+  transfer: {
+    base: 500,                // vétérinaire, anesthésie et vol en hélicoptère
+    rate: 0.04,               // plus une part du prix de l'animal
+    aim: 1.2,                 // secondes de jeu : la vétérinaire vise
+    drowsy: 2.6,              // l'animal titube puis s'endort
+    heliIn: 5,                // l'hélicoptère arrive
+    lift: 4.5,                // câble, filet, levage
+    drop: 4,                  // descente dans le nouvel enclos
+    leave: 4.5                // départ de l'hélicoptère ; l'animal se réveille
+  },
+
   /* ---------- Prédation (chasses visibles dans les enclos mixtes) ---------- */
   predation: {
     rate: 0.1,                // chasses par heure de jeu et par prédateur adulte (une toutes les ~10 h)
@@ -240,33 +275,8 @@ DZ.CONFIG = {
     deathRatingPenalty: 0.2
   },
 
-  /* ---------- Qualité graphique ---------- */
-  quality: {
-    high:   { cacheScale: 2.5, spriteScale: 3,   particles: 600, godRays: true,  shadows: true, waterFx: true,  maxGroups: 'high' },
-    medium: { cacheScale: 2,   spriteScale: 2.2, particles: 260, godRays: false, shadows: true, waterFx: true,  maxGroups: 'medium' },
-    low:    { cacheScale: 1.25, spriteScale: 1.6, particles: 80, godRays: false, shadows: false, waterFx: false, maxGroups: 'low' }
-  },
-
-  camera: { minZoom: 0.3, maxZoom: 2.6, startZoom: 1.0, zoomStep: 1.15, minDist3D: 2.2, maxDist3D: 175 },
-
-  /* ---------- Palette (réaliste, désaturée) ---------- */
-  palette: {
-    grass: ['#4c6a2c', '#58783a', '#668645', '#3d5824', '#72904c'],
-    grassBlade: ['#7c9b52', '#3a5422', '#8aa866', '#55762f'],
-    dirt: ['#8a6a43', '#76583a', '#9c7c52', '#6a4e33'],
-    sand: ['#c9b38a', '#b9a077', '#d8c6a0', '#a89070'],
-    rock: ['#7d7b74', '#6b6a64', '#93908a', '#55534f'],
-    paving: ['#bcae94', '#ab9d84', '#c9bea6', '#9d907a'],
-    curb: '#6c6354',
-    water: { shallow: '#4f8a7e', mid: '#2c6670', deep: '#17404e', foam: '#e6f0ea', sky: '#c9e4ea' },
-    foliage: ['#24391a', '#2f4a1f', '#3c5b27', '#4b6d2f', '#5d8139', '#6f9545'],
-    trunk: ['#5a4030', '#6b4c36', '#4a3426', '#7a5a40'],
-    wood: ['#8a6240', '#a07650', '#6e4c30', '#b88c62'],
-    metal: ['#8a9196', '#5c6368', '#b8bfc3', '#3f454a'],
-    concrete: ['#b0aca2', '#9a968c', '#c6c2b8'],
-    canvas: ['#e9dfc4', '#3f6b4a', '#b5523a', '#d7a84a'],
-    jungle: '#1d2e16'
-  },
+  /* ---------- Caméra 3D : distance mini / maxi, pas de la molette ---------- */
+  camera: { zoomStep: 1.15, minDist3D: 2.2, maxDist3D: 175 },
 
   /* Lumière au fil de la journée : multiplication + teinte additive */
   light: [

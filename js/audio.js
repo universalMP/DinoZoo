@@ -1006,10 +1006,8 @@ window.DZ = window.DZ || {};
        ------------------------------------------------------------------ */
     analyze(game, renderer) {
       if (!this.ctx || !game.s) return;
-      const C = DZ.CONFIG, T = C.map.tile, W = C.map.w, H = C.map.h;
-      let cx, cz, alt;
-      if (renderer.is3D) { cx = renderer.cam.tx; cz = renderer.cam.tz; alt = renderer.eye[1]; }
-      else { cx = renderer.cam.x / T; cz = renderer.cam.y / T; alt = 8 / renderer.cam.zoom; }
+      const C = DZ.CONFIG, W = C.map.w, H = C.map.h;
+      const cx = renderer.cam.tx, cz = renderer.cam.tz, alt = renderer.eye[1];
       const rad = 14;
       let n = 0, sea = 0, fresh = 0, forest = 0, jungle = 0, mount = 0;
       const B = DZ.BIOME;
@@ -1148,6 +1146,16 @@ window.DZ = window.DZ || {};
           n.connect(bp); bp.connect(lp); lp.connect(g); g.connect(o.g); this._env(g.gain, t, 0.01, 0.5, 0.06, 0.55);
           this._bubbles(t + 0.15, o.g, 9, 700, 2500, 0.06, 0.9);
           o.g.gain.value = 0.7; setTimeout(o.end, 1500);
+          break;
+        }
+        case 'dart': { // fléchette anesthésiante : souffle bref, puis impact étouffé
+          const o = this.out(pos || null, { range: 30 });
+          if (!o) return;
+          const n = this._src(this.white, t, 0.12), bp = this._filter('bandpass', 2400, 0.9), ng = c.createGain();
+          n.connect(bp); bp.connect(ng); ng.connect(o.g); this._env(ng.gain, t, 0.002, 0.35, 0.02, 0.06);
+          const k = this._src(this.brown, t + 0.16, 0.08), kl = this._filter('lowpass', 420), kg = c.createGain();
+          k.connect(kl); kl.connect(kg); kg.connect(o.g); this._env(kg.gain, t + 0.16, 0.002, 0.5, 0.01, 0.06);
+          o.g.gain.value = 0.8; setTimeout(o.end, 700);
           break;
         }
         case 'clash': { // choc d'un combat entre deux mâles

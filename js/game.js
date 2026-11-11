@@ -275,8 +275,10 @@ window.DZ = window.DZ || {};
       this.litter = new Uint8Array(W * H);
       this.occ = new Int32Array(W * H);
       this.linkAt = new Int32Array(W * H);
+      this.sky = new Uint8Array(W * H);
       this.fights = [];
       this.hunts = [];
+      this.transfers = [];
       this.visitors = [];
       // Entrée et chemins de départ
       const e = this._addBuilding('entree', ENT.x, ENT.y, 0);
@@ -316,9 +318,13 @@ window.DZ = window.DZ || {};
         if (data.clearedStr) for (const k of data.clearedStr.split(',')) if (k) this.cleared[parseInt(k, 36)] = 1;
         delete data.clearedStr;
         this.path = new Uint8Array(W * H);
+        this.sky = new Uint8Array(W * H);
         this.litter = new Uint8Array(W * H);
         for (let i = 0; i < W * H; i++) {
-          this.path[i] = data.pathStr.charCodeAt(i) === 49 ? 1 : 0;
+          // 0 : rien, 1 : chemin, 2 / 3 : passerelle d'observation (est-ouest / nord-sud)
+          const c = data.pathStr.charCodeAt(i) - 48;
+          this.path[i] = c >= 1 && c <= 3 ? 1 : 0;
+          if (c === 2 || c === 3) this.sky[i] = c - 1;
           this.litter[i] = Math.max(0, (data.litterStr.charCodeAt(i) || 48) - 48);
         }
         delete data.pathStr; delete data.litterStr;
@@ -330,11 +336,18 @@ window.DZ = window.DZ || {};
         this._rebuildLinks();
         this.fights = [];
         this.hunts = [];
+        this.transfers = [];
         // champs ajoutés au fil des versions
         if (!data.player) data.player = { name: 'Directeur', gender: 'h', avatar: 0, set: false };
         if (!data.deliveries) data.deliveries = [];
         if (!data.nextDel) data.nextDel = 1;
         if (!data.births) data.births = [];
+        // transferts en cours au moment de la sauvegarde : l'animal est arrivé
+        for (const x of data.xfers || []) {
+          const d = this.s.dinos.find((o) => o.id === x.d), b = this.s.buildings[x.to];
+          if (d && b) { d.enc = b.id; const p = this.randomPointIn(b, d.sp); d.x = p.x; d.y = p.y; }
+        }
+        delete data.xfers;
         for (const d of this.s.dinos) { if (!d.sex) d.sex = d.id % 2 ? 'M' : 'F'; this._initDinoTransient(d); const b = this.s.buildings[d.enc]; if (b) this.keepInside(d, b, DZ.SPECIES[d.sp]); }
         this._initPlayer();
         this.visitors = [];
@@ -352,7 +365,7 @@ window.DZ = window.DZ || {};
     serialize() {
       const s = this.s;
       let pathStr = '', litterStr = '';
-      for (let i = 0; i < W * H; i++) { pathStr += this.path[i] ? '1' : '0'; litterStr += String.fromCharCode(48 + Math.min(9, this.litter[i])); }
+      for (let i = 0; i < W * H; i++) { pathStr += this.sky[i] ? String(this.sky[i] + 1) : this.path[i] ? '1' : '0'; litterStr += String.fromCharCode(48 + Math.min(9, this.litter[i])); }
       const dinos = s.dinos.map((d) => ({
         id: d.id, sp: d.sp, enc: d.enc, name: d.name, x: d.x, y: d.y, face: d.face,
         upHab: d.upHab, upCare: d.upCare, sick: d.sick, sickDays: d.sickDays, happiness: d.happiness, born: d.born,
@@ -368,12 +381,46 @@ window.DZ = window.DZ || {};
       for (let i = 0; i < W * H; i++) if (this.cleared[i] && this.treeAt[i]) cl.push(i.toString(36));
       const links = {};
       for (const id in s.links) { const l = s.links[id]; links[id] = { id: l.id, a: l.a, b: l.b, x: l.x, y: l.y, w: l.w, h: l.h, dir: l.dir, len: l.len, invested: l.invested, cons: l.cons }; }
-      return Object.assign({}, s, { dinos, buildings, links, pathStr, litterStr, clearedStr: cl.join(','), weather: s.weather });
+      const xfers = (this.transfers || []).filter((tr) => !tr.landed).map((tr) => ({ d: tr.d.id, to: tr.to }));
+      return Object.assign({}, s, { dinos, buildings, links, xfers, pathStr, litterStr, clearedStr: cl.join(','), weather: s.weather });
     }
 
     /* ---------- Accès à la carte ---------- */
     terrainAt(x, y) { return inMap(x, y) ? this.terrain[idx(x, y)] : -1; }
     isPath(x, y) { return inMap(x, y) && this.path[idx(x, y)] === 1; }
+    /* Passer d'une case de chemin à sa voisine (dx, dy) : une passerelle
+       d'observation ne se prend que par ses escaliers, dans son axe. */
+    canStep(c, n, dx) {
+      const a = this.sky[c], b = this.sky[n];
+      if (!a && !b) return true;
+      const v = dx ? 1 : 2;
+      return (!a || a === v) && (!b || b === v);
+    }
+    /* Hauteur d'un point sur une passerelle d'observation : 0 au sol, 1 sur
+       le tablier. L'escalier part du milieu de la case de chemin et finit
+       dans la première case au-dessus de l'enclos. */
+    skyLift(x, y) {
+      const tx = Math.floor(x), ty = Math.floor(y);
+      if (!inMap(tx, ty)) return 0;
+      const i = idx(tx, ty), sv = this.sky[i];
+      const fx = x - tx, fy = y - ty;
+      const prof = (s) => s < 0 ? U.clamp((s + 0.5) / 0.5, 0, 1) * 0.45 : Math.min(1, 0.45 + 0.55 * s / 0.6);
+      if (sv) {
+        const ax = sv === 1 ? 1 : 0, ay = 1 - ax, f = sv === 1 ? fx : fy;
+        const same = (k) => inMap(tx + ax * k, ty + ay * k) && this.sky[idx(tx + ax * k, ty + ay * k)] === sv;
+        const prev = same(-1), next = same(1);
+        if (!prev && next) return prof(f);
+        if (prev && !next) return prof(1 - f);
+        return 1;
+      }
+      if (!this.path[i]) return 0;
+      let best = 0;
+      for (const [dx, dy, f] of [[1, 0, fx], [-1, 0, 1 - fx], [0, 1, fy], [0, -1, 1 - fy]]) {
+        const nx = tx + dx, ny = ty + dy;
+        if (inMap(nx, ny) && this.sky[idx(nx, ny)] === (dx ? 1 : 2)) best = Math.max(best, prof(f - 1));
+      }
+      return best;
+    }
     buildingAt(x, y) { if (!inMap(x, y)) return null; const id = this.occ[idx(x, y)]; return id ? this.s.buildings[id] : null; }
     get buildings() { return this.s.buildings; }
     get dinos() { return this.s.dinos; }
@@ -438,6 +485,7 @@ window.DZ = window.DZ || {};
     removePath(x, y) {
       if (!this.isPath(x, y)) return { ok: false };
       if (x === ENT.tileX && y === ENT.tileY) return { ok: false, reason: 'Le chemin d\'entrée est indispensable' };
+      if (this.sky[idx(x, y)] || this.skyFoot(x, y)) return { ok: false, reason: 'Démolissez d\'abord la passerelle d\'observation' };
       this.path[idx(x, y)] = 0;
       this.litter[idx(x, y)] = 0;
       const refund = Math.round(this.pathCost(x, y) * C.path.refund);
@@ -558,6 +606,7 @@ window.DZ = window.DZ || {};
     demolish(id) {
       const b = this.s.buildings[id];
       if (!b || b.fixed) return { ok: false, reason: 'Ce bâtiment ne peut pas être démoli' };
+      if (this.transferBusy(b)) return { ok: false, reason: 'Un dinosaure est en cours de transfert' };
       let refund = Math.round(b.invested * C.economy.refundRate);
       for (const d of this.s.dinos.filter((d) => d.enc === b.id)) refund += this._dinoValue(d) * C.economy.dinoSellRate;
       for (const dl of this.s.deliveries) if (dl.enc === b.id && !dl.dropped && !dl.cancelled) { refund += C.dinos[dl.sp].price; dl.cancelled = true; }
@@ -565,6 +614,7 @@ window.DZ = window.DZ || {};
       refund = Math.round(refund);
       this.s.dinos = this.s.dinos.filter((d) => d.enc !== b.id);
       for (const l of this.linksOf(b)) refund += this._removeLink(l, true);
+      for (const r of this.skyRunsOver(b)) refund += this._removeSky(r);
       refund = Math.round(refund);
       this.fights = this.fights.filter((f) => f.enc !== b.id);
       this.hunts = this.hunts.filter((h) => h.enc !== b.id);
@@ -572,7 +622,7 @@ window.DZ = window.DZ || {};
       delete this.s.buildings[id];
       this._rebuildOcc();
       this._earn(refund, null);
-      for (const g of this.visitors) if (g.target && g.target.key === b.id) { g.hidden = false; g.state = 'idle'; }
+      for (const g of this.visitors) if (g.target && (g.target.bid || g.target.key) === b.id) { g.hidden = false; g.state = 'idle'; }
       this._netChanged({ x0: b.x - 1, y0: b.y - 1, x1: b.x + b.w, y1: b.y + b.h });
       this._updateHappiness();
       this.emit('demolished', { x: b.x + b.w / 2, y: b.y + b.h / 2, refund, building: b });
@@ -585,6 +635,8 @@ window.DZ = window.DZ || {};
       if (this.busy(b)) return { ok: false, reason: 'Impossible de déplacer un chantier en cours' };
       if (b.parts) return { ok: false, reason: 'Un enclos agrandi ne peut pas être déplacé' };
       if (this.linksOf(b).length) return { ok: false, reason: 'Démolissez d\'abord ses passerelles' };
+      if (this.skyRunsOver(b).length) return { ok: false, reason: 'Démolissez d\'abord la passerelle d\'observation' };
+      if (this.transferBusy(b)) return { ok: false, reason: 'Un dinosaure est en cours de transfert' };
       const c = this.canPlace(b.type, nx, ny, b.id, true);
       if (!c.ok) return c;
       const old = { x0: b.x - 1, y0: b.y - 1, x1: b.x + b.w, y1: b.y + b.h };
@@ -593,7 +645,7 @@ window.DZ = window.DZ || {};
       for (const d of this.s.dinos) if (d.enc === b.id) { d.x += dx; d.y += dy; d.gx += dx; d.gy += dy; }
       this._removeTreesIn(nx, ny, b.w, b.h);
       this._rebuildOcc();
-      for (const g of this.visitors) if (g.target && g.target.key === b.id) { g.hidden = false; g.state = 'idle'; }
+      for (const g of this.visitors) if (g.target && (g.target.bid || g.target.key) === b.id) { g.hidden = false; g.state = 'idle'; }
       this._netChanged(old);
       this.emit('mapChanged', { x0: nx - 1, y0: ny - 1, x1: nx + b.w, y1: ny + b.h });
       this.emit('moved', b);
@@ -609,6 +661,8 @@ window.DZ = window.DZ || {};
       for (const [px, py, pw, ph] of DZ.encParts(b)) {
         for (let x = px; x < px + pw; x++) { add(x, py - 1); add(x, py + ph); }
         for (let y = py; y < py + ph; y++) { add(px - 1, y); add(px + pw, y); }
+        // passerelle d'observation : on regarde aussi d'en haut
+        for (let y = py; y < py + ph; y++) for (let x = px; x < px + pw; x++) if (this.sky[idx(x, y)]) add(x, y);
       }
       b._acc = out; b._accV = this.netVersion;
       return out;
@@ -619,7 +673,12 @@ window.DZ = window.DZ || {};
       if (f) return f;
       let seeds;
       if (key === 'exit') seeds = [idx(ENT.tileX, ENT.tileY)];
-      else {
+      else if (typeof key === 'string' && key.startsWith('sky:')) {
+        // vers le tablier d'une passerelle d'observation au-dessus de l'enclos
+        const b = this.s.buildings[+key.slice(4)];
+        if (!b) return null;
+        seeds = this.accessTiles(b).filter((i) => this.sky[i]);
+      } else {
         const b = this.s.buildings[key];
         if (!b) return null;
         seeds = this.accessTiles(b);
@@ -635,7 +694,7 @@ window.DZ = window.DZ || {};
           const nx = cx + d[0], ny = cy + d[1];
           if (!inMap(nx, ny)) continue;
           const n = idx(nx, ny);
-          if (this.path[n] && f[n] < 0) { f[n] = f[c] + 1; q[qt++] = n; }
+          if (this.path[n] && f[n] < 0 && this.canStep(c, n, d[0])) { f[n] = f[c] + 1; q[qt++] = n; }
         }
       }
       this.fields.set(key, f);
@@ -652,8 +711,9 @@ window.DZ = window.DZ || {};
       const nodes = [];
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
         const i = idx(x, y);
-        if (!this.path[i] || this.terrain[i] === TER.WATER) continue;
+        if (!this.path[i] || this.terrain[i] === TER.WATER || this.sky[i]) continue;
         if (x === ENT.tileX && y === ENT.tileY) continue;
+        if (DIRS.some((d) => inMap(x + d[0], y + d[1]) && this.sky[idx(x + d[0], y + d[1])])) continue; // pied d'escalier
         const nb = [];
         for (const d of DIRS) { const nx = x + d[0], ny = y + d[1]; if (inMap(nx, ny) && this.path[idx(nx, ny)]) nb.push(idx(nx, ny)); }
         if (nb.length === 2) nodes.push([i, nb[0], nb[1]]);
@@ -723,6 +783,7 @@ window.DZ = window.DZ || {};
       let s = 0;
       for (const d of this.s.dinos) if (d.enc === b.id) s += this.dinoSpace(d);
       for (const dl of this.s.deliveries) if (dl.enc === b.id && !dl.dropped && !dl.cancelled) s += C.dinos[dl.sp].space;
+      for (const tr of this.transfers || []) if (tr.to === b.id && !tr.landed) s += this.dinoSpace(tr.d);
       return s;
     }
     dinoSpace(d) { const sp = C.dinos[d.sp].space; return d.young ? Math.max(1, Math.ceil(sp * C.breeding.babySpace)) : sp; }
@@ -943,6 +1004,7 @@ window.DZ = window.DZ || {};
     sellDino(id) {
       const d = this.s.dinos.find((x) => x.id === id);
       if (!d) return { ok: false };
+      if (d.tr) return { ok: false, reason: 'Transfert en cours' };
       const refund = Math.round(this._dinoValue(d) * C.economy.dinoSellRate);
       this.playerTask(d.x, d.y, 'care', d.enc);
       this.s.dinos = this.s.dinos.filter((x) => x !== d);
@@ -1084,7 +1146,7 @@ window.DZ = window.DZ || {};
         if (!b) continue;
         const sp = DZ.SPECIES[d.sp];
         d.t += dt;
-        if (d.fight || d.hunt) continue; // combats et chasses sont animés à part
+        if (d.fight || d.hunt || (d.tr && d.tr.hold)) continue; // combats, chasses et transferts sont animés à part
         if (d.cross) { this._updateCrossing(d, b, sp, dt); continue; }
         if (sp.habitat === 'air') this._updateFlyer(d, b, sp, dt);
         else if (sp.habitat === 'water') this._updateSwimmer(d, b, sp, dt);
@@ -1198,7 +1260,7 @@ window.DZ = window.DZ || {};
         for (const a of list) { dinos += a * f; f *= C.duplicateFactor; }
       }
       decor = Math.min(decor, C.decorAttractionCap);
-      dinos += this.linkShow();
+      dinos += this.linkShow() + this.skyShow();
       const diversity = species.size * C.diversityBonus + families.size * C.familyBonus;
       const clean = this.cleanliness();
       const total = (dinos + services + decor + diversity) * (0.8 + 0.2 * clean / 100);
@@ -1274,6 +1336,7 @@ window.DZ = window.DZ || {};
       this._updateWorks(dh);
       this._updateDeliveries(dh);
       this._updateLinkWorks(dh);
+      if (this.transfers.length) this._updateTransfers(dt);
       this._checkFights(dh);
       this._checkHunts(dh);
       if (s.births.length) this._checkBirths(prevHour);
@@ -1657,6 +1720,7 @@ window.DZ = window.DZ || {};
         lane: rr(-0.26, 0.26), state: 'enter', target: null,
         sat: V.startSatisfaction + rr(-6, 6), hunger: rr(5, 35), bladder: rr(0, 30),
         hr: rr(0.8, 1.2), br: rr(0.8, 1.2),
+        kids: members.filter((m) => m.child).length, play: rr(0, 35), played: [],
         seen: [], shops: 0, stayUntil: s.hour + rr(V.stayHours[0], V.stayHours[1]),
         mood: 'content', bubbleT: 0, litter: 0, wd: 0, dirX: 0, dirY: -1, hidden: false, wander: 0
       };
@@ -1681,6 +1745,7 @@ window.DZ = window.DZ || {};
       for (const g of this.visitors) {
         g.hunger += V.hungerRate * dh * g.hr;
         g.bladder += V.bladderRate * dh * g.br;
+        if (g.kids) g.play += C.play.rate * dh;
         g.sat -= V.boredom * dh;
         if (storm && !g.hidden) g.sat -= 4 * dh;
         if (g.hunger > 88) g.sat -= V.needPenalty * dh;
@@ -1718,6 +1783,7 @@ window.DZ = window.DZ || {};
     }
 
     _recordExit(g) {
+      this._stopPlay(g);
       const t = this.s.today;
       const w = g.members.length * g.scale;
       t.satSum += g.sat * w; t.satN += w;
@@ -1758,7 +1824,7 @@ window.DZ = window.DZ || {};
           let opts = [];
           for (const d of DIRS) {
             const nx = g.tx + d[0], ny = g.ty + d[1];
-            if (inMap(nx, ny) && f[idx(nx, ny)] === here - 1) opts.push([nx, ny]);
+            if (inMap(nx, ny) && f[idx(nx, ny)] === here - 1 && this.canStep(idx(g.tx, g.ty), idx(nx, ny), d[0])) opts.push([nx, ny]);
           }
           if (!opts.length) { this.decide(g, true); return; }
           const o = opts[(g.id + g.tx * 7 + g.ty * 13) % opts.length];
@@ -1772,6 +1838,7 @@ window.DZ = window.DZ || {};
           g.x = gx; g.y = gy; budget -= dist; g.wd += dist;
           g.tx = g.nx; g.ty = g.ny; g.nx = null;
           this._onTile(g);
+          if (g.state !== 'walk') return;
         } else {
           g.x += dx / dist * budget; g.y += dy / dist * budget; g.wd += budget;
           g.dirX = dx / dist; g.dirY = dy / dist;
@@ -1784,7 +1851,7 @@ window.DZ = window.DZ || {};
       if (g.nx === null) {
         if (g.wanderSteps <= 0) { this.decide(g); return; }
         const opts = [];
-        for (const d of DIRS) if (this.isPath(g.tx + d[0], g.ty + d[1])) opts.push(d);
+        for (const d of DIRS) if (this.isPath(g.tx + d[0], g.ty + d[1]) && this.canStep(idx(g.tx, g.ty), idx(g.tx + d[0], g.ty + d[1]), d[0])) opts.push(d);
         if (!opts.length) { this.goExit(g); return; }
         const d = U.pick(R, opts);
         g.nx = g.tx + d[0]; g.ny = g.ty + d[1];
@@ -1797,7 +1864,8 @@ window.DZ = window.DZ || {};
 
     _onTile(g) {
       const i = idx(g.tx, g.ty);
-      if (g.litter > 0 && R() < 0.18) {
+      if (this.sky[i] && this._skyGlance(g, i)) return;
+      if (g.litter > 0 && R() < 0.18 && !this.sky[i]) {
         g.litter--;
         if (!this.binCover()[i] && this.litter[i] < 9) { this.litter[i]++; this.emit('litter', { x: g.tx, y: g.ty }); }
       }
@@ -1829,6 +1897,8 @@ window.DZ = window.DZ || {};
       // envie de souvenirs après quelques enclos
       if (!target && g.shops === 0 && g.seen.length >= 2 && R() < 0.55) { target = nearest('boutique'); kind = 'boutique'; }
       if (!target && g.shops === 0 && g.seen.length >= 1 && g.hunger > 35 && R() < 0.3) { target = nearest('restaurant'); kind = 'restaurant'; }
+      // les enfants veulent jouer
+      if (!target && g.kids && g.play > C.play.seek) { target = this._nearestPlay(g, here); kind = 'jeux'; }
       if (!target) {
         let bestScore = 0;
         for (const id in s.buildings) {
@@ -1841,13 +1911,18 @@ window.DZ = window.DZ || {};
             if (a <= 0) continue;
             const d = this.field(b.id)[here];
             if (d < 0) continue;
-            score = (8 + a) / (1 + d * 0.05) * rr(0.6, 1.4);
+            score = (8 + a) / (1 + d * 0.05) * rr(0.6, 1.4) * (this.skyRunsOver(b).length ? C.skywalk.appeal : 1);
           } else continue;
           if (score > bestScore) { bestScore = score; target = b; kind = 'enclos'; }
         }
       }
       if (target) {
         g.target = { key: target.id, kind };
+        // une passerelle au-dessus de l'enclos : on y monte souvent pour mieux voir
+        if (kind === 'enclos' && R() < 0.6 && this.skyRunsOver(target).length) {
+          const f = this.field('sky:' + target.id);
+          if (f && f[here] >= 0) g.target = { key: 'sky:' + target.id, bid: target.id, kind };
+        }
         g.state = 'walk';
         g.wander = 0;
         return;
@@ -1860,6 +1935,7 @@ window.DZ = window.DZ || {};
     goExit(g) {
       g.nx = null;
       g.hidden = false;
+      this._stopPlay(g);
       const f = this.field('exit');
       if (!this.isPath(g.tx, g.ty) || f[idx(g.tx, g.ty)] < 0) { g.state = 'exit'; return; }
       g.target = { key: 'exit', kind: 'exit' };
@@ -1870,7 +1946,7 @@ window.DZ = window.DZ || {};
       const t = g.target;
       if (!t) return this.decide(g);
       if (t.kind === 'exit') { g.state = 'exit'; return; }
-      const b = this.s.buildings[t.key];
+      const b = this.s.buildings[t.bid || t.key];
       if (!b) return this.decide(g);
       g.state = 'act';
       g.actBuilding = b.id;
@@ -1879,9 +1955,14 @@ window.DZ = window.DZ || {};
       const dx = cx - (g.tx + 0.5), dy = cy - (g.ty + 0.5);
       const len = Math.hypot(dx, dy) || 1;
       g.dirX = dx / len; g.dirY = dy / len;
-      if (t.kind === 'enclos') {
+      if (t.kind === 'enclos' && this.sky[idx(g.tx, g.ty)]) {
+        this._skyWatch(g, b);
+      } else if (t.kind === 'jeux') {
+        this._startPlay(g, b);
+      } else if (t.kind === 'enclos') {
         g.actT = rr(0.45, 0.95);
         g.hidden = false;
+        g.view = 1;
         const pcs = this.pathCenters(), ci = idx(g.tx, g.ty);
         g.standX = pcs[ci * 2] + g.dirX * 0.22 + (-g.dirY) * rr(-0.3, 0.3);
         g.standY = pcs[ci * 2 + 1] + g.dirY * 0.22 + g.dirX * rr(-0.3, 0.3);
@@ -1894,7 +1975,7 @@ window.DZ = window.DZ || {};
 
     _finishActivity(g) {
       const t = g.target;
-      const b = t && this.s.buildings[t.key];
+      const b = t && this.s.buildings[t.bid || t.key];
       g.hidden = false;
       g.standX = undefined;
       const people = g.members.length * g.scale;
@@ -1905,7 +1986,8 @@ window.DZ = window.DZ || {};
           g.seen.push(b.id);
           const a = this.enclosureAttraction(b);
           const novelty = Math.max(0.4, 1 - g.seen.length * 0.08);
-          const gain = Math.min(24, 4 + Math.sqrt(a) * 1.6) * novelty;
+          const gain = Math.min(24, 4 + Math.sqrt(a) * 1.6) * novelty * (g.view || 1);
+          g.view = 1;
           g.sat = Math.min(100, g.sat + gain);
           if (gain > 15) { g.mood = 'ravi'; g.bubbleT = 2.5; }
           this.emit('watched', { g, b, gain });
@@ -1927,8 +2009,11 @@ window.DZ = window.DZ || {};
         } else if (t.kind === 'toilettes') {
           g.bladder = rr(0, 8);
           g.sat = Math.min(100, g.sat + def.satisfaction[lv]);
+        } else if (t.kind === 'jeux') {
+          this._endPlay(g, b);
         }
       }
+      this._stopPlay(g);
       g.target = null;
       this.decide(g);
     }

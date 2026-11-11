@@ -3,8 +3,6 @@
    ===================================================================== */
 window.DZ = window.DZ || {};
 (function () {
-  const C = DZ.CONFIG;
-
   function autoQuality() {
     const cores = navigator.hardwareConcurrency || 4;
     const pixels = window.innerWidth * window.innerHeight * Math.pow(Math.min(2, window.devicePixelRatio || 1), 2);
@@ -16,26 +14,18 @@ window.DZ = window.DZ || {};
   function boot() {
     const st = DZ.Save.settings();
     let quality = st.quality || autoQuality();
-    DZ.R.generateTextures(1234);
     const game = new DZ.Game();
     const canvas = document.getElementById('view');
-    // rendu 3D (WebGL 2) par défaut, 2D en secours ou sur demande
-    let renderer = null;
-    const want3D = st.renderer !== '2d';
-    if (want3D && DZ.G && DZ.G.webgl2Available()) {
-      try { renderer = new DZ.G.Renderer3D(canvas, game); } catch (err) { console.warn('Rendu 3D indisponible, passage en 2D', err); renderer = null; }
-    }
-    if (!renderer) renderer = new DZ.R.Renderer(canvas, game);
+    // le jeu se joue en 3D (WebGL 2)
+    if (!DZ.G.webgl2Available()) throw new Error('ce navigateur ne gère pas WebGL 2, indispensable au rendu 3D du jeu. Essayez un navigateur récent (Chrome, Firefox, Safari, Edge) et vérifiez que l\'accélération matérielle est activée.');
+    const renderer = new DZ.G.Renderer3D(canvas, game);
     renderer.setQuality(quality);
     const saved = DZ.Save.load();
     const resumed = !!(saved && game.load(saved));
     if (!resumed) game.newGame();
-    if (renderer.is3D) {
-      // vignettes du catalogue rendues en 3D
-      DZ.R.dinoThumb = (id, w, h) => renderer.thumbDino(id, w, h);
-      const thumb2D = DZ.R.buildingThumb;
-      DZ.R.buildingThumb = (type, w, h) => DZ.CONFIG.buildings[type] ? renderer.thumbBuilding(type, w, h) : thumb2D(type, w, h);
-    }
+    // vignettes du catalogue rendues en 3D
+    DZ.R.dinoThumb = (id, w, h) => renderer.thumbDino(id, w, h);
+    DZ.R.buildingThumb = (type, w, h) => renderer.thumbBuilding(type, w, h);
     const sound = new DZ.Sound();
     sound.muted = !!st.muted;
     if (st.vol) Object.assign(sound.vol, st.vol);
@@ -63,12 +53,7 @@ window.DZ = window.DZ || {};
     ui.onReset = () => askPlayer({ title: 'Nouvelle partie', go: 'Commencer la partie', name: game.s.player.set ? game.s.player.name : '', gender: game.s.player.gender, avatar: game.s.player.avatar }, (p) => {
       DZ.Save.clear();
       game.newGame(undefined, Object.assign(p, { set: true }));
-      if (renderer.resetCamera) renderer.resetCamera();
-      else {
-        renderer.cam.x = (C.map.entrance.tileX + 0.5) * C.map.tile;
-        renderer.cam.y = (C.map.h - 6) * C.map.tile;
-        renderer.cam.tz = renderer.cam.zoom = C.camera.startZoom;
-      }
+      renderer.resetCamera();
       renderer.particles.length = 0;
       game.setSpeed(1); ui.refreshSpeed();
       DZ.Save.save(game);
@@ -100,18 +85,14 @@ window.DZ = window.DZ || {};
         DZ.tutorial.update(dt);
         // écouteur 3D placé sur la caméra, analyse du lieu
         if (sound.ctx) {
-          if (renderer.is3D) {
-            const e = renderer.eye, c = renderer.cam;
-            const fx = c.tx - e[0], fy = c.ty - e[1], fz = c.tz - e[2], fl = Math.hypot(fx, fy, fz) || 1;
-            sound.setListener(e[0], e[1], e[2], fx / fl, fy / fl, fz / fl);
-          } else {
-            const T = C.map.tile;
-            sound.setListener(renderer.cam.x / T, 8 / renderer.cam.zoom, renderer.cam.y / T + 2 / renderer.cam.zoom, 0, -0.9, -0.44);
-          }
+          const e = renderer.eye, c = renderer.cam;
+          const fx = c.tx - e[0], fy = c.ty - e[1], fz = c.tz - e[2], fl = Math.hypot(fx, fy, fz) || 1;
+          sound.setListener(e[0], e[1], e[2], fx / fl, fy / fl, fz / fl);
           audioT += dt;
           if (audioT > 0.3) { audioT = 0; sound.analyze(game, renderer); }
           const helis = [];
           for (const dl of game.s.deliveries) { const p = game.deliveryPose(dl); if (p) helis.push({ id: dl.id, x: p.x, y: 0.6 + p.alt * 8.5, z: p.y }); }
+          for (const tr of game.transfers) { const p = game.transferPose(tr); if (p) helis.push({ id: 'T' + tr.id, x: p.x, y: 0.6 + p.alt * 8.5, z: p.y }); }
           sound.heliSync(helis);
         }
       } catch (err) {
@@ -154,7 +135,6 @@ window.DZ = window.DZ || {};
     DZ.app = { game, renderer, ui, sound };
     const hookMusic = () => { if (sound.music && !sound.music.onTheme) sound.music.onTheme = (title) => ui.toast('🎵', '♪ ' + title, 'music'); };
     setInterval(hookMusic, 1000);
-    ui.is3D = !!renderer.is3D;
   }
 
   window.addEventListener('load', () => {

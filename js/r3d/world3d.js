@@ -193,12 +193,12 @@
       const add = (ax, az, bx, bz, tiles) => { const id = segs.length; segs.push([ax, az, bx, bz]); for (const t of tiles) (per[t] = per[t] || []).push(id); };
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
         const i = y * W + x;
-        if (!g.path[i]) continue;
+        if (!g.path[i] || g.sky[i]) continue; // tablier des passerelles d'observation : maillage à part
         const wi = g.terrain[i] === TER.WATER;
         let n = 0;
         for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
           const nx = x + dx, ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= W || ny >= H || !g.path[ny * W + nx]) continue;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H || !g.path[ny * W + nx] || g.sky[ny * W + nx]) continue;
           n++;
           if (dx < 0 || dy < 0) continue; // chaque paire une seule fois
           const j = ny * W + nx, wj = g.terrain[j] === TER.WATER;

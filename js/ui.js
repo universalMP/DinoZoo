@@ -19,10 +19,10 @@ window.DZ = window.DZ || {};
   const TREE_TYPES = ['arbre', 'palmier', 'fougere'];
 
   const TABS = [
-    { id: 'chemins', icon: '🛤️', name: 'Chemins', items: ['path'] },
+    { id: 'chemins', icon: '🛤️', name: 'Chemins', items: ['path', 'sky'] },
     { id: 'enclos', icon: '🏞️', name: 'Enclos', items: ['enclos_s', 'enclos_m', 'enclos_l', 'voliere', 'lagon', 'link', 'merge'] },
     { id: 'dinos', icon: '🦖', name: 'Dinosaures', items: 'dinos' },
-    { id: 'services', icon: '🍽️', name: 'Services', items: ['boutique', 'restaurant', 'toilettes'] },
+    { id: 'services', icon: '🍽️', name: 'Services', items: ['boutique', 'restaurant', 'toilettes', 'balancoires', 'toboggan', 'fauxdino'] },
     { id: 'deco', icon: '🌴', name: 'Décor', items: ['poubelle', 'banc', 'lampadaire', 'arbre', 'palmier', 'fougere', 'fontaine'] },
     { id: 'outils', icon: '🛠️', name: 'Outils', items: ['select', 'move', 'demolish'] }
   ];
@@ -31,6 +31,7 @@ window.DZ = window.DZ || {};
     move: { name: 'Déplacer', icon: '✋', desc: 'Déplacer un bâtiment gratuitement (les dinosaures suivent).' },
     demolish: { name: 'Démolir', icon: '🧨', desc: 'Démolir un bâtiment ou un chemin (remboursement partiel).' },
     link: { name: 'Passerelle', icon: '🌉', desc: 'Relier deux enclos terrestres face à face (10 cases au plus) : les dinosaures passent de l\'un à l\'autre, au-dessus des allées. Cliquez sur un enclos, puis sur le second.' },
+    sky: { name: 'Passerelle d\'observation', icon: '🔭', desc: 'Un chemin surélevé qui traverse un enclos (ou plusieurs enclos voisins) en ligne droite. Les visiteurs montent par l\'escalier et regardent les dinosaures d\'en haut : meilleure vue, plus de satisfaction, plus d\'attractivité. Cliquez d\'un côté de l\'enclos, puis de l\'autre.' },
     merge: { name: 'Réunir', icon: '🔗', desc: 'Réunir deux enclos terrestres qui se touchent : la clôture commune disparaît, la place s\'additionne. Cliquez sur un enclos, puis sur son voisin.' }
   };
   const BUILD_DESC = {
@@ -43,6 +44,9 @@ window.DZ = window.DZ || {};
     boutique: 'Les visiteurs y achètent des souvenirs.',
     restaurant: 'Nourrit les visiteurs affamés. Produit quelques déchets.',
     toilettes: 'Indispensables pour garder des visiteurs satisfaits.',
+    balancoires: 'Un portique de balançoires. Les familles avec des enfants viennent s\'y amuser.',
+    toboggan: 'Une tour avec échelle et toboggan. Les enfants l\'adorent.',
+    fauxdino: 'Un faux dinosaure à escalader, avec un filet et une queue-toboggan. Le jeu préféré des petits.',
     poubelle: 'Ramasse les déchets dans un rayon de 3 cases.',
     banc: 'Les visiteurs se reposent : satisfaction en hausse.',
     lampadaire: 'Éclaire les allées le soir.',
@@ -96,8 +100,8 @@ window.DZ = window.DZ || {};
       chip.addEventListener('click', () => { const p = this.game.pl; if (p) { this.focus(p.x * T, p.y * T); this.sound.play('click'); } });
       this.refreshPlayer();
       this.refreshSpeed();
-      // boussole (3D) : indique le nord ; un toucher remet le nord en haut et redresse la vue
-      if (this.r.rotate) {
+      // boussole : indique le nord ; un toucher remet le nord en haut et redresse la vue
+      {
         const cp = el('button', 'glass', '<span class="needle"><b>N</b><i></i></span>');
         cp.id = 'compass';
         cp.dataset.tip = 'Remettre le nord en haut. Deux doigts : tourner, zoomer ; deux doigts glissés vers le haut ou le bas : incliner.';
@@ -128,7 +132,7 @@ window.DZ = window.DZ || {};
     /* Choix du nom, du genre et de l'avatar au début d'une partie. */
     avatarThumb(i, g) {
       const key = 'av' + i + g;
-      return this.thumbs[key] || (this.thumbs[key] = this.r.thumbAvatar ? this.r.thumbAvatar(i, g, 120, 110) : DZ.avatarPortrait(i, g, 120, 110));
+      return this.thumbs[key] || (this.thumbs[key] = this.r.thumbAvatar(i, g, 120, 110));
     }
     openPlayerSetup(opts, onDone) {
       opts = opts || {};
@@ -297,7 +301,7 @@ window.DZ = window.DZ || {};
             const tl = TOOLS[key];
             it.appendChild(el('div', 'emoji', tl.icon));
             it.appendChild(el('div', 'name', tl.name));
-            it.appendChild(el('div', 'price', key === 'select' ? 'Échap' : key === 'move' ? 'Touche M' : key === 'link' ? 'dès ' + money(Math.round(C.links.base * C.links.gateFactor)) : key === 'merge' ? 'Enclos voisins' : 'Touche X'));
+            it.appendChild(el('div', 'price', key === 'select' ? 'Échap' : key === 'move' ? 'Touche M' : key === 'link' ? 'dès ' + money(Math.round(C.links.base * C.links.gateFactor)) : key === 'merge' ? 'Enclos voisins' : key === 'sky' ? 'dès ' + money(this.game.skyCost(4)) : 'Touche X'));
             it.dataset.tip = `<b>${tl.name}</b><div class="t-sub">${tl.desc}</div>`;
             it.dataset.tool = key;
             it.addEventListener('click', () => this.setTool({ kind: key }));
@@ -338,9 +342,13 @@ window.DZ = window.DZ || {};
     pathThumb() {
       const c = R.canvas(200, 112), g = c.getContext('2d');
       g.scale(2, 2);
-      g.fillStyle = R.pattern(g, 'grass'); g.fillRect(0, 0, 100, 56);
-      g.fillStyle = R.pattern(g, 'paving'); g.fillRect(0, 16, 100, 24);
-      g.fillStyle = C.palette.curb; g.fillRect(0, 16, 100, 2); g.fillRect(0, 38, 100, 2);
+      g.fillStyle = '#58783a'; g.fillRect(0, 0, 100, 56);
+      g.fillStyle = 'rgba(0,0,0,0.08)'; for (let i = 0; i < 60; i++) g.fillRect((i * 37) % 100, (i * 23) % 56, 1.5, 3);
+      g.fillStyle = '#b5a68b'; g.fillRect(0, 16, 100, 24);
+      g.strokeStyle = 'rgba(80,70,55,0.35)'; g.lineWidth = 0.6;
+      for (let x = 4; x < 100; x += 9) { g.beginPath(); g.moveTo(x, 16); g.lineTo(x + 3, 40); g.stroke(); }
+      g.beginPath(); g.moveTo(0, 28); g.lineTo(100, 28); g.stroke();
+      g.fillStyle = '#6c6354'; g.fillRect(0, 16, 100, 2); g.fillRect(0, 38, 100, 2);
       return c;
     }
 
@@ -359,6 +367,7 @@ window.DZ = window.DZ || {};
       if (def.space) grid += `<span>Place</span><span>${def.space} (×2 au niveau 3)</span><span>Taille</span><span>${def.w} × ${def.h}</span>`;
       if (def.spend) grid += `<span>Dépense / visiteur</span><span>${money(def.spend[0])}</span>`;
       if (def.satisfaction) grid += `<span>Satisfaction</span><span>+${def.satisfaction[0]}</span>`;
+      if (def.fun) grid += `<span>Amusement</span><span>+${def.fun[0]} satisfaction</span><span>Enfants à la fois</span><span>${def.kids[0]}</span>`;
       if (def.attraction && !def.space) grid += `<span>Attractivité</span><span>+${Array.isArray(def.attraction) ? def.attraction[0] : def.attraction}</span>`;
       return `<b>${esc(def.name)}</b><div class="t-sub">${BUILD_DESC[key] || ''}</div><div class="t-grid">${grid}</div>`;
     }
@@ -382,6 +391,12 @@ window.DZ = window.DZ || {};
       }
       else if (t.kind === 'demolish') { text = '🧨 Cliquez sur un bâtiment ou glissez sur des chemins pour démolir'; this.canvas.classList.add('tool-demolish'); }
       else if (t.kind === 'move') { text = t.id ? '✋ Choisissez le nouvel emplacement' : '✋ Choisissez le bâtiment à déplacer'; }
+      else if (t.kind === 'sky') { text = t.a ? '🔭 Passerelle d\'observation : cliquez de l\'autre côté de l\'enclos' : '🔭 Passerelle d\'observation : cliquez d\'un côté de l\'enclos (à côté d\'un chemin)'; this.canvas.classList.add('tool-path'); }
+      else if (t.kind === 'transfer') {
+        const g = this.game, d = g.dinos.find((x) => x.id === t.dino);
+        text = d ? `🚁 Cliquez sur le nouvel enclos de ${esc(d.name)}` : '';
+        this.r.highlightEnclosures = (b) => !!d && g.canTransfer(d, b).ok;
+      }
       else if (t.kind === 'link' || t.kind === 'merge') {
         const g = this.game, a = t.a && g.buildings[t.a];
         const verb = t.kind === 'link' ? '🌉 Passerelle' : '🔗 Réunir';
@@ -427,9 +442,14 @@ window.DZ = window.DZ || {};
         const x = Math.floor(p.wx / T - def.w / 2 + 0.5), y = Math.floor(p.wy / T - def.h / 2 + 0.5);
         const ok = t.kind === 'build' ? g.canPlace(type, x, y).ok : g.canPlace(type, x, y, t.id, true).ok;
         this.r.ghost = { kind: 'building', type, x, y, ok, level: t.kind === 'move' ? g.buildings[t.id].level : 1 };
+      } else if (t.kind === 'sky') {
+        if (t.a) { const plan = g.skyPlan(t.a[0], t.a[1], p.x, p.y); this.r.ghost = { kind: 'sky', a: t.a, plan, ok: plan.ok }; }
+        else this.r.ghost = { kind: 'sky', a: [p.x, p.y], plan: null, ok: true };
       } else if (t.kind === 'demolish' || (t.kind === 'move' && !t.id)) {
         const b = g.buildingAt(p.x, p.y), l = g.linkAtTile(p.x, p.y) || this.rampAt(p);
-        if (b && !b.fixed && !(t.kind === 'demolish' && l)) this.r.ghost = { kind: 'demolish', building: b };
+        const sk = t.kind === 'demolish' && g.skyRunAt(p.x, p.y);
+        if (sk) this.r.ghost = { kind: 'demolish', sky: sk };
+        else if (b && !b.fixed && !(t.kind === 'demolish' && l)) this.r.ghost = { kind: 'demolish', building: b };
         else if (t.kind === 'demolish' && l) this.r.ghost = { kind: 'demolish', link: l };
         else if (t.kind === 'demolish' && g.isPath(p.x, p.y)) this.r.ghost = { kind: 'demolish', x: p.x, y: p.y };
         else this.r.ghost = null;
@@ -494,8 +514,31 @@ window.DZ = window.DZ || {};
         this.pending = null;
         if (t.kind === 'link') this.doLink(t.a, b.id); else this.doMerge(t.a, b.id);
         return;
+      } else if (t.kind === 'sky' && !dragging) {
+        if (!t.a) { this.setTool({ kind: 'sky', a: [p.x, p.y] }); this.updateGhost(sx, sy); return; }
+        const plan = g.skyPlan(t.a[0], t.a[1], p.x, p.y);
+        // au doigt : un premier toucher montre le tracé, un second au même endroit confirme
+        if (this.touch && !(this.pending && this.pending.x === p.x && this.pending.y === p.y)) {
+          this.pending = { x: p.x, y: p.y };
+          this.r.ghost = { kind: 'sky', a: t.a, plan, ok: plan.ok };
+          this.showHint(plan.ok ? `👆 Passerelle de ${plan.len} cases : ${money(plan.cost)} · touchez à nouveau pour confirmer` : `✋ ${esc(plan.reason)} · touchez ailleurs`);
+          return;
+        }
+        this.pending = null;
+        if (!plan.ok) { this.error(plan.reason); return; }
+        const r = g.buildSky(t.a[0], t.a[1], p.x, p.y);
+        if (r.ok) { this.sound.play('build'); this.toast('🔭', `Passerelle d'observation construite : ${r.plan.len} cases au-dessus ${r.plan.encs.length > 1 ? 'des enclos' : 'de l\'enclos'}. Les visiteurs vont adorer la vue.`, 'good'); this.setTool({ kind: 'sky' }); }
+        else this.error(r.reason);
+        return;
+      } else if (t.kind === 'transfer' && !dragging) {
+        const b = g.buildingAt(p.x, p.y);
+        if (!b || !g.isEnclosure(b)) { this.error('Cliquez sur un enclos'); return; }
+        this.doTransfer(t.dino, b.id);
+        return;
       } else if (t.kind === 'demolish') {
         const b = g.buildingAt(p.x, p.y), l = !dragging && (g.linkAtTile(p.x, p.y) || this.rampAt(p));
+        const sk = !dragging && g.skyRunAt(p.x, p.y);
+        if (sk) { this.demolishSky(sk); return; }
         if (l) this.demolishLink(l);
         else if (b && !dragging) this.demolish(b);
         else if (!b && g.isPath(p.x, p.y)) { const r = g.removePath(p.x, p.y); if (!r.ok && r.reason && !dragging) this.error(r.reason); }
@@ -524,10 +567,11 @@ window.DZ = window.DZ || {};
           else this.error(r.reason);
         }
       } else if (t.kind === 'select' && !dragging) {
-        const d = this.r.pickDinoAt ? this.r.pickDinoAt(sx, sy) : this.r.pickDino(p.wx, p.wy);
+        const d = this.r.pickDinoAt(sx, sy);
         if (d) { this.select({ kind: 'dino', id: d.id }); this.sound.play('click'); return; }
         const l = g.linkAtTile(p.x, p.y);
         if (l) { this.select({ kind: 'link', id: l.id }); this.sound.play('click'); return; }
+        if (g.sky[p.y * C.map.w + p.x]) { this.select({ kind: 'sky', x: p.x, y: p.y }); this.sound.play('click'); return; }
         const b = g.buildingAt(p.x, p.y);
         if (b) { this.select({ kind: 'building', id: b.id }); this.sound.play('click'); }
         else this.select(null);
@@ -584,6 +628,30 @@ window.DZ = window.DZ || {};
         this.select({ kind: 'building', id: aId });
       });
     }
+    demolishSky(r) {
+      const g = this.game, refund = Math.round(g.skyCost(r.len) * C.economy.refundRate);
+      this.confirm('Démolir cette passerelle d\'observation ?', `Les ${r.len} cases du tablier et leurs escaliers seront démontés. Remboursement : ${money(refund)}.`, 'Démolir', () => {
+        const res = g.demolishSky(r.x, r.y);
+        if (res.ok) { this.sound.play('build'); this.toast('🧨', `Passerelle d'observation démolie : ${money(res.refund)} remboursés.`, 'info'); if (this.panelSel && this.panelSel.kind === 'sky') this.select(null); }
+      });
+    }
+    /* Transfert d'un dinosaure : confirmation (prix, dangers), puis vétérinaire et hélicoptère. */
+    doTransfer(dinoId, bid) {
+      const g = this.game, d = g.dinos.find((x) => x.id === dinoId), b = g.buildings[bid];
+      const c = g.canTransfer(d, b);
+      if (!c.ok) { this.error(c.reason); return; }
+      const warn = [];
+      if (c.warning) warn.push(`⚠️ ${capFirst(DZ.leSp(c.warning.predator))} risque d'attaquer ${DZ.leSp(c.warning.prey)} dans cet enclos.`);
+      if (c.rivals) warn.push(`⚔️ ${c.rivals} autre${c.rivals > 1 ? 's' : ''} mâle${c.rivals > 1 ? 's' : ''} de son espèce y vi${c.rivals > 1 ? 'vent' : 't'} déjà : risque de combats.`);
+      this.confirm(`Transférer ${d.name} ?`, `Une vétérinaire va l'endormir avec une fléchette, puis un hélicoptère ${d.sex === 'F' ? 'la' : 'le'} portera dans un filet jusqu'à ${esc(DZ.bName(b))}. Coût : ${money(c.cost)}.${warn.length ? '<br><br>' + warn.join('<br>') : ''}`, 'Transférer', () => {
+        const r = g.transferDino(d.id, b.id);
+        if (!r.ok) { this.error(r.reason); return; }
+        this.sound.play('upgrade');
+        this.toast('🩺', `La vétérinaire part endormir ${esc(d.name)}. L'hélicoptère suivra.`, 'info');
+        this.setTool({ kind: 'select' });
+        this.select({ kind: 'dino', id: d.id });
+      });
+    }
     demolishLink(l) {
       const g = this.game;
       const refund = Math.round((l.invested || 0) * C.economy.refundRate);
@@ -612,7 +680,7 @@ window.DZ = window.DZ || {};
         // deux doigts : déplacer, zoomer, tourner (et incliner)
         if (this.pointers.size >= 2) { this.startGesture(); return; }
         if (this.gestureLock) return;
-        const rot = !!this.r.rotate && (e.button === 2 || (e.button === 0 && (e.altKey || e.ctrlKey)));
+        const rot = (e.button === 2 || (e.button === 0 && (e.altKey || e.ctrlKey)));
         const pan = !rot && (e.button === 1 || e.button === 2 || this.keys.has(' '));
         this.drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, pan, rot, button: e.button, painting: false, touch: this.touch };
         if (!pan && !rot && e.button === 0 && (this.tool.kind === 'path' || this.tool.kind === 'demolish')) {
@@ -713,7 +781,7 @@ window.DZ = window.DZ || {};
       for (const p of this.pointers.values()) { p.sx = p.x; p.sy = p.y; }
       const g = this.gesturePts();
       this.gesture = { d0: g.d, a0: g.ang, m0: g.m, prevD: g.d, prevM: g.m, mode: null };
-      if (this.r.gestureBegin2) this.r.gestureBegin2(g.a, g.b);
+      this.r.gestureBegin2(g.a, g.b);
     }
     moveGesture() {
       const G = this.gesture, g = this.gesturePts();
@@ -723,23 +791,17 @@ window.DZ = window.DZ || {};
         // deux doigts qui glissent ensemble verticalement : inclinaison
         const dya = g.a.y - g.a.sy, dyb = g.b.y - g.b.sy, dxa = g.a.x - g.a.sx, dxb = g.b.x - g.b.sx;
         const vertical = Math.sign(dya) === Math.sign(dyb) && Math.abs(dya) > Math.abs(dxa) * 1.6 && Math.abs(dyb) > Math.abs(dxb) * 1.6;
-        G.mode = this.r.gestureMove2 && vertical && Math.abs(g.d / G.d0 - 1) < 0.1 ? 'tilt' : 'map';
+        G.mode = vertical && Math.abs(g.d / G.d0 - 1) < 0.1 ? 'tilt' : 'map';
       }
-      if (this.r.gestureMove2) {
-        if (G.mode === 'tilt') {
-          if (!G.tiltStarted) { G.tiltStarted = true; this.r.gestureBegin(G.m0.x, G.m0.y); }
-          this.r.gestureMove(G.m0.x, G.m0.y, 1, 0, (g.m.y - G.m0.y) * 0.004);
-        } else this.r.gestureMove2({ x: g.a.x, y: g.a.y }, { x: g.b.x, y: g.b.y });
-      } else {
-        // rendu 2D : zoom et déplacement
-        this.r.zoomAt(g.m.x, g.m.y, g.d / G.prevD);
-        this.r.pan(g.m.x - G.prevM.x, g.m.y - G.prevM.y);
-      }
+      if (G.mode === 'tilt') {
+        if (!G.tiltStarted) { G.tiltStarted = true; this.r.gestureBegin(G.m0.x, G.m0.y); }
+        this.r.gestureMove(G.m0.x, G.m0.y, 1, 0, (g.m.y - G.m0.y) * 0.004);
+      } else this.r.gestureMove2({ x: g.a.x, y: g.a.y }, { x: g.b.x, y: g.b.y });
       G.prevD = g.d; G.prevM = g.m;
     }
     endGesture() {
       this.gesture = null;
-      if (this.r.gestureEnd) this.r.gestureEnd();
+      this.r.gestureEnd();
     }
 
     bindKeys() {
@@ -758,12 +820,12 @@ window.DZ = window.DZ || {};
         else if (k === 'm') this.setTool({ kind: 'move' });
         else if (k === 'v') this.setTool({ kind: 'select' });
         else if (k === 'c') this.setTool({ kind: 'path' });
-        else if ((k === '[' || k === 'pageup') && this.r.rotateBy) this.r.rotateBy(Math.PI / 4);
-        else if ((k === ']' || k === 'pagedown') && this.r.rotateBy) this.r.rotateBy(-Math.PI / 4);
-        else if (k === 'home' && this.r.resetCamera) { const c = this.r.cam; c.tyaw = 0; c.pitchOff = 0; c.tdist = 11; }
+        else if (k === '[' || k === 'pageup') this.r.rotateBy(Math.PI / 4);
+        else if (k === ']' || k === 'pagedown') this.r.rotateBy(-Math.PI / 4);
+        else if (k === 'home') { const c = this.r.cam; c.tyaw = 0; c.pitchOff = 0; c.tdist = 11; }
         else if (k === '+' || k === '=') this.r.zoomAt(this.r.vw / 2, this.r.vh / 2, 1.25);
         else if (k === '-') this.r.zoomAt(this.r.vw / 2, this.r.vh / 2, 0.8);
-        else if (k === 'delete' || k === 'backspace') { const s = this.r.selected; if (s && s.kind === 'building') this.demolish(this.game.buildings[s.id]); }
+        else if (k === 'delete' || k === 'backspace') { const s = this.r.selected; if (s && s.kind === 'building') this.demolish(this.game.buildings[s.id]); else if (s && s.kind === 'link' && this.game.s.links[s.id]) this.demolishLink(this.game.s.links[s.id]); else if (s && s.kind === 'sky') { const r = this.game.skyRunAt(s.x, s.y); if (r) this.demolishSky(r); } }
       });
       window.addEventListener('keyup', (e) => { const k = e.key.toLowerCase(); this.keys.delete(k === ' ' ? ' ' : k); });
       window.addEventListener('blur', () => this.keys.clear());
@@ -815,9 +877,20 @@ window.DZ = window.DZ || {};
         this.showTip(p.ok || p.cost ? `<b>${what}</b><div class="t-grid"><span>Prix</span><span>${money(p.cost)}</span><span>Travaux</span><span>≈ ${fmtH(p.hours)}</span></div>${p.ok ? '' : `<div class="t-sub" style="color:#f3c3b5">${esc(p.reason)}</div>`}` : `<div class="t-sub" style="color:#f3c3b5">${esc(p.reason)}</div>`, { x: sx, y: sy });
         return;
       }
+      if (this.tool.kind === 'sky' && gh && gh.plan) {
+        const p = gh.plan;
+        this.showTip(p.ok ? `<b>🔭 Passerelle de ${p.len} cases</b><div class="t-grid"><span>Prix</span><span>${money(p.cost)}</span></div>` : `<div class="t-sub" style="color:#f3c3b5">${esc(p.reason)}</div>`, { x: sx, y: sy });
+        return;
+      }
+      if (this.tool.kind === 'transfer') {
+        const g = this.game, p = this.tileAt(sx, sy), b = g.buildingAt(p.x, p.y), d = g.dinos.find((x) => x.id === this.tool.dino);
+        if (b && d && g.isEnclosure(b)) { const c = g.canTransfer(d, b); this.showTip(`<b>🚁 ${esc(DZ.bName(b))}</b>${c.ok ? `<div class="t-grid"><span>Prix</span><span>${money(c.cost)}</span></div>${c.warning ? '<div class="t-sub" style="color:#f3c3b5">⚠️ Prédateur et proie ensemble</div>' : ''}` : `<div class="t-sub" style="color:#f3c3b5">${esc(c.reason)}</div>`}`, { x: sx, y: sy }); }
+        else this.hideTip();
+        return;
+      }
       if (this.tool.kind !== 'select' && this.tool.kind !== 'dino') { this.hideTip(); return; }
       const g = this.game, p = this.tileAt(sx, sy);
-      const d = this.r.pickDinoAt ? this.r.pickDinoAt(sx, sy) : this.r.pickDino(p.wx, p.wy);
+      const d = this.r.pickDinoAt(sx, sy);
       if (d) { this.showTip(this.dinoHover(d), { x: sx, y: sy }); return; }
       const l = g.linkAtTile(p.x, p.y);
       if (l) { this.showTip(this.linkHover(l), { x: sx, y: sy }); return; }
@@ -871,6 +944,10 @@ window.DZ = window.DZ || {};
         const l = g.s.links[sel.id];
         if (!l) { this.select(null); return; }
         html = this.linkPanel(l);
+      } else if (sel.kind === 'sky') {
+        const r = g.skyRunAt(sel.x, sel.y);
+        if (!r) { this.select(null); return; }
+        html = this.skyPanel(r);
       } else {
         const d = g.dinos.find((x) => x.id === sel.id);
         if (!d) { this.select(null); return; }
@@ -916,14 +993,17 @@ window.DZ = window.DZ || {};
         const dl = g.deliveriesTo(b).map((x) => x.id + g.deliveryPhase(x).phase + Math.round(g.deliveryPhase(x).left * 12)).join(',');
         const ls = g.linksOf(b).map((l) => l.id + ':' + Math.round(g.linkProgress(l) * 50)).join(',');
         const rv = g.rivalryInfo(b).map((r) => r.sp + r.n + r.calm).join(',');
-        return [b.id, b.level, ds, dl, moneyBand, g.isConnected(b), Math.round(b.earned || 0), b.x, b.y, b.w, b.h, Math.round(g.worksProgress(b) * 50), !!b.upg, JSON.stringify(b.breed || {}), ls, rv, Object.keys(g.buildings).length].join('|');
+        const kd = C.buildings[b.type].play ? g.kidsAt(b).length : '';
+        const tf = (g.transfers || []).filter((tr) => tr.to === b.id || tr.from === b.id).map((tr) => tr.id + tr.phase).join(',');
+        return [b.id, b.level, ds, dl, kd, tf, moneyBand, g.isConnected(b), Math.round(b.earned || 0), b.x, b.y, b.w, b.h, Math.round(g.worksProgress(b) * 50), !!b.upg, JSON.stringify(b.breed || {}), ls, rv, Object.keys(g.buildings).length].join('|');
       }
       if (sel.kind === 'link') {
         const l = g.s.links[sel.id];
         return l ? [l.id, Math.round(g.linkProgress(l) * 50), g.dinos.filter((d) => d.cross && d.cross.l === l.id).length].join('|') : 'x';
       }
+      if (sel.kind === 'sky') { const r = g.skyRunAt(sel.x, sel.y); return r ? [r.id, r.len, this.skyCrowd(r)].join('|') : 'x'; }
       const d = g.dinos.find((x) => x.id === sel.id);
-      return d ? [d.id, d.sick, d.upHab, d.upCare, Math.round(d.happiness), moneyBand, d.young, d.enc].join('|') : 'x';
+      return d ? [d.id, d.sick, d.upHab, d.upCare, Math.round(d.happiness), moneyBand, d.young, d.enc, d.tr ? d.tr.phase : ''].join('|') : 'x';
     }
 
     buildingPanel(b) {
@@ -954,11 +1034,11 @@ window.DZ = window.DZ || {};
           else if (pi.chance > 0) h += `<div class="warn">⚠️ ${esc(capFirst(DZ.leSp(pi.pred)))} chasse : ${pi.young ? 'les petits ' + esc(Q.name) : esc(DZ.leSp(pi.prey))} risque${pi.young ? 'nt' : ''} d'être attaqué${pi.young ? 's' : ''} environ toutes les ${every} h (réussite ≈ ${Math.round(pi.chance * 100)} %).</div>`;
           else h += `<div class="info">🛡️ ${esc(capFirst(DZ.leSp(pi.pred)))} attaque parfois ${esc(DZ.leSp(pi.prey))}, trop grand pour lui : la proie se défend et peut le blesser.</div>`;
         }
-        if (pinfo.length) h += `<div class="info small">Séparez-les : vendez et rachetez dans un autre enclos. Une passerelle permet aux proies de fuir.</div>`;
+        if (pinfo.length) h += `<div class="info small">Séparez-les : transférez l'un d'eux dans un autre enclos (sélectionnez l'animal, puis 🚁 Transférer). Une passerelle permet aux proies de fuir.</div>`;
         if (b.level === 1 && dinos.some((d) => DZ.SPECIES[d.sp].predator && DZ.SPECIES[d.sp].size === 'L')) h += '<div class="warn">⚠️ Une simple palissade ne retiendra pas longtemps un grand prédateur. Améliorez la clôture pour éviter les évasions.</div>';
         for (const rv of g.rivalryInfo(b)) {
           const sp = DZ.SPECIES[rv.sp];
-          const tip = rv.exit ? 'Le vaincu peut s\'éloigner par la passerelle.' : 'Une passerelle vers un enclos voisin permettrait au vaincu de s\'éloigner ; sinon, gardez un seul mâle.';
+          const tip = rv.exit ? 'Le vaincu peut s\'éloigner par la passerelle.' : 'Une passerelle vers un enclos voisin permettrait au vaincu de s\'éloigner ; sinon, transférez un mâle dans un autre enclos.';
           h += `<div class="${rv.terr >= 0.4 ? 'warn' : 'info'} rival">⚔️ ${rv.n} ${esc(sp.short || sp.name)} mâles adultes : rivalité ${rv.level}${rv.calm ? ' (trêve après un combat)' : ''}. ${rv.terr >= 0.4 ? 'Combats fréquents, risque de blessures. ' : ''}${tip}</div>`;
         }
         h += '<div class="section"><h3>Pensionnaires</h3>';
@@ -967,7 +1047,12 @@ window.DZ = window.DZ || {};
         for (const d of dinos) {
           const sp = DZ.SPECIES[d.sp];
           const hp = Math.round(d.happiness);
-          h += `<div class="dino-row" data-act="dino" data-id="${d.id}"><canvas data-thumb="${d.sp}"></canvas><div><div class="n">${esc(d.name)} <span class="sex ${d.sex}">${SEX[d.sex] || ''}</span>${d.young ? ' <span class="baby">bébé</span>' : ''} ${d.sick ? (d.injured ? '🩹' : '🤒') : ''}${d.fight ? ' ⚔️' : ''}${d.hunt ? (d.hunt.pred === d ? ' 🍖' : ' 😱') : ''}${d.cross ? ' 🌉' : ''}</div><div class="s">${esc(sp.short || sp.name)} · ❤ ${hp} % · ★ ${Math.round(g.dinoAttraction(d))}</div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div></div></div>`;
+          h += `<div class="dino-row" data-act="dino" data-id="${d.id}"><canvas data-thumb="${d.sp}"></canvas><div><div class="n">${esc(d.name)} <span class="sex ${d.sex}">${SEX[d.sex] || ''}</span>${d.young ? ' <span class="baby">bébé</span>' : ''} ${d.sick ? (d.injured ? '🩹' : '🤒') : ''}${d.fight ? ' ⚔️' : ''}${d.hunt ? (d.hunt.pred === d ? ' 🍖' : ' 😱') : ''}${d.cross ? ' 🌉' : ''}${d.tr ? ' 🚁' : ''}</div><div class="s">${esc(sp.short || sp.name)} · ❤ ${hp} % · ★ ${Math.round(g.dinoAttraction(d))}</div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div></div></div>`;
+        }
+        for (const tr of g.transfers) {
+          if (tr.to !== b.id || tr.landed) continue;
+          const sp = DZ.SPECIES[tr.d.sp];
+          h += `<div class="dino-row incoming" data-act="dino" data-id="${tr.d.id}"><canvas data-thumb="${tr.d.sp}"></canvas><div><div class="n">🚁 ${esc(tr.d.name)} <span class="sex ${tr.d.sex}">${SEX[tr.d.sex] || ''}</span></div><div class="s">${esc(sp.short || sp.name)} · transfert : ${esc(g.transferPhaseText(tr).replace(/^\S+ /, ''))}</div></div></div>`;
         }
         for (const dl of incoming) {
           const sp = DZ.SPECIES[dl.sp], ph = g.deliveryPhase(dl);
@@ -991,8 +1076,10 @@ window.DZ = window.DZ || {};
         if (def.spend) h += `<span class="k">Dépense moyenne</span><span class="v">${money(def.spend[lv])} / visiteur</span>`;
         if (def.chance) h += `<span class="k">Taux d'achat</span><span class="v">${pct(def.chance[lv])}</span>`;
         if (def.satisfaction) h += `<span class="k">Satisfaction</span><span class="v">+${def.satisfaction[lv]}</span>`;
-        h += `<span class="k">Revenus cumulés</span><span class="v">${money(b.earned || 0)}</span>`;
+        if (def.play) h += `<span class="k">Amusement</span><span class="v">+${def.fun[lv]} satisfaction</span><span class="k">Enfants qui jouent</span><span class="v">${g.kidsAt(b).length} / ${def.kids[lv]}</span>`;
+        if (!def.play) h += `<span class="k">Revenus cumulés</span><span class="v">${money(b.earned || 0)}</span>`;
         h += `<span class="k">Entretien / jour</span><span class="v">${money(def.upkeep[lv])}</span></div>`;
+        if (def.play) h += '<div class="desc">Gratuit pour les visiteurs. Les familles avec des enfants y passent un moment : toute la famille repart plus satisfaite.</div>';
       } else if (b.type === 'entree') {
         h += `<div class="rows"><span class="k">Prix du billet</span><span class="v">${money(g.ticketPrice())}</span><span class="k">Visiteurs aujourd'hui</span><span class="v">${U.fmt(s.today.visitors)}</span><span class="k">Visiteurs au total</span><span class="v">${U.fmt(s.totalVisitors || 0)}</span></div><div class="info">Le prix du billet augmente avec la note du parc.</div>`;
       } else {
@@ -1047,6 +1134,22 @@ window.DZ = window.DZ || {};
       return h;
     }
 
+    skyCrowd(r) {
+      let n = 0;
+      for (const v of this.game.visitors) { const x = Math.floor(v.x), y = Math.floor(v.y); if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) n += v.members.length * v.scale; }
+      return Math.round(n);
+    }
+    skyPanel(r) {
+      const g = this.game, names = r.encs.map((id) => g.buildings[id]).filter((b) => b).map((b) => esc(DZ.bName(b)));
+      const att = r.encs.reduce((a, id) => a + (g.buildings[id] ? g.enclosureAttraction(g.buildings[id]) : 0), 0) * C.skywalk.attraction;
+      let h = `<h2>🔭 Passerelle d'observation</h2><div class="sub">Au-dessus de ${names.join(' et ') || '?'}</div>`;
+      h += `<div class="rows"><span class="k">Longueur</span><span class="v">${r.len} cases</span><span class="k">Visiteurs dessus</span><span class="v">${this.skyCrowd(r)}</span><span class="k">Attractivité en plus</span><span class="v">+${Math.round(att)}</span></div>`;
+      h += `<div class="desc">Les visiteurs montent par l'escalier et regardent les dinosaures d'en haut : ils gagnent ${Math.round((C.skywalk.view - 1) * 100)} % de satisfaction en plus qu'à travers la clôture, et préfèrent les enclos qu'on peut survoler.</div>`;
+      h += `<div class="btns">${r.encs.map((id) => g.buildings[id] ? `<button class="btn" data-act="enc" data-id="${id}">🏞️ ${esc(DZ.bName(g.buildings[id]))}</button>` : '').join('')}</div>`;
+      h += `<div class="btns"><button class="btn danger" data-act="unsky">🧨 Démolir (+${money(Math.round(g.skyCost(r.len) * C.economy.refundRate))})</button></div>`;
+      return h;
+    }
+
     upgradeText(b) {
       const def = C.buildings[b.type], n = b.level;
       const L = C.enclosureLevels;
@@ -1058,6 +1161,7 @@ window.DZ = window.DZ || {};
       if (b.type === 'boutique') return `Dépense ${money(def.spend[n - 1])} → ${money(def.spend[n])}, taux d'achat ${pct(def.chance[n - 1])} → ${pct(def.chance[n])}.`;
       if (b.type === 'restaurant') return `Repas ${money(def.spend[n - 1])} → ${money(def.spend[n])}, moins de déchets, visiteurs plus satisfaits.`;
       if (b.type === 'toilettes') return `Satisfaction +${def.satisfaction[n - 1]} → +${def.satisfaction[n]}.`;
+      if (def.play) return `Amusement +${def.fun[n - 1]} → +${def.fun[n]}, ${def.kids[n - 1]} → ${def.kids[n]} enfants à la fois, attractivité +${def.attraction[n - 1]} → +${def.attraction[n]}.`;
       return '';
     }
 
@@ -1087,7 +1191,14 @@ window.DZ = window.DZ || {};
         h += `<button class="btn wide" style="margin-bottom:6px;justify-content:space-between" data-act="dup" data-k="${k}" ${done || s.money < cost ? 'disabled' : ''}><span>${k === 'habitat' ? '🌿' : '🩺'} ${u.name} · +${Math.round(u.attraction * 100)} % attractivité</span><span class="cost">${done ? '✓' : money(cost)}</span></button>`;
       }
       h += '</div>';
-      h += `<div class="btns"><button class="btn" data-act="enc" data-id="${b ? b.id : ''}">🏞️ Voir l'enclos</button><button class="btn danger" data-act="sell">Vendre (+${money(Math.round(g._dinoValue(d) * C.economy.dinoSellRate))})</button></div>`;
+      if (d.tr) {
+        const to = g.buildings[d.tr.to];
+        h += `<div class="section"><h3>Transfert</h3><div class="info">🚁 Vers ${to ? esc(DZ.bName(to)) : '?'} · ${esc(g.transferPhaseText(d.tr) || 'terminé')}</div></div>`;
+      } else {
+        const cost = g.transferCost(d);
+        h += `<div class="section"><h3>Changer d'enclos</h3><div class="info small">Une vétérinaire l'endort, un hélicoptère le dépose dans l'enclos choisi.</div><button class="btn wide opt" data-act="transfer" ${s.money < cost ? 'disabled' : ''}><span>🚁 Transférer dans un autre enclos</span><span class="cost">${money(cost)}</span></button></div>`;
+      }
+      h += `<div class="btns"><button class="btn" data-act="enc" data-id="${b ? b.id : ''}">🏞️ Voir l'enclos</button><button class="btn danger" data-act="sell" ${d.tr ? 'disabled' : ''}>Vendre (+${money(Math.round(g._dinoValue(d) * C.economy.dinoSellRate))})</button></div>`;
       return h;
     }
 
@@ -1100,6 +1211,7 @@ window.DZ = window.DZ || {};
       if (act === 'dino') { this.select({ kind: 'dino', id: +t.dataset.id }); return; }
       if (act === 'enc' || act === 'lk-go') { this.select({ kind: 'building', id: +t.dataset.id }); const o = g.buildings[+t.dataset.id]; if (o && act === 'lk-go') this.focus((o.x + o.w / 2) * T, (o.y + o.h / 2) * T); return; }
       if (act === 'unlink') { const l = g.s.links[+t.dataset.id]; if (l) this.demolishLink(l); return; }
+      if (act === 'unsky' && sel.kind === 'sky') { const r = g.skyRunAt(sel.x, sel.y); if (r) this.demolishSky(r); return; }
       if (sel.kind === 'building') {
         const b = g.buildings[sel.id];
         if (act === 'upgrade') { const r = g.upgrade(b.id); if (r.ok) { this.sound.play('build'); this.toast('🚧', `Travaux d'amélioration lancés : ${C.buildings[b.type].name}, niveau ${b.level + 1} dans ≈ ${fmtH(r.hours)}.`, 'info'); } else this.error(r.reason); }
@@ -1112,6 +1224,11 @@ window.DZ = window.DZ || {};
         const d = g.dinos.find((x) => x.id === sel.id);
         if (!d) return;
         if (act === 'treat') { const r = g.treatDino(d.id); if (r.ok) this.sound.play('upgrade'); else this.error(r.reason); }
+        else if (act === 'transfer') {
+          const n = Object.values(g.buildings).filter((o) => g.canTransfer(d, o).ok).length;
+          if (!n) { this.error('Aucun autre enclos adapté n\'a de place pour ' + d.name); return; }
+          this.setTool({ kind: 'transfer', dino: d.id }); return;
+        }
         else if (act === 'dup') { const r = g.upgradeDino(d.id, t.dataset.k); if (r.ok) { this.sound.play('upgrade'); this.r.burst(d.x * T, d.y * T - 10, 16, 'sparkle'); } else this.error(r.reason); }
         else if (act === 'sell') {
           this.confirm(`Vendre ${d.name} ?`, `Vous récupérerez ${money(Math.round(g._dinoValue(d) * C.economy.dinoSellRate))}.`, 'Vendre', () => { const encId = d.enc; const r = g.sellDino(d.id); if (r.ok) { this.sound.play('coin'); this.select({ kind: 'building', id: encId }); } });
@@ -1186,7 +1303,7 @@ window.DZ = window.DZ || {};
 
     error(reason) { this.toast('✋', esc(reason || 'Action impossible'), 'error'); this.sound.play('error'); }
 
-    focus(x, y) { if (this.r.focus) { this.r.focus(x, y); return; } this.r.cam.x = x; this.r.cam.y = y; this.r.clampCam(); }
+    focus(x, y) { this.r.focus(x, y); }
 
     showSummary(sm) {
       const box = $('#summary');
@@ -1234,7 +1351,6 @@ window.DZ = window.DZ || {};
       this.modal(`<h2>DinoZoo</h2><p>Jour ${this.game.s.day} · ${money(this.game.s.totalEarned)} gagnés depuis l'ouverture.</p>
         <div class="menu-list">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:14px">Qualité graphique</span><div class="seg" id="q-seg">${['low', 'medium', 'high'].map((k) => `<button data-q="${k}" class="${q === k ? 'on' : ''}">${{ low: 'Basse', medium: 'Moyenne', high: 'Élevée' }[k]}</button>`).join('')}</div></div>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:14px">Affichage</span><div class="seg" id="r-seg"><button data-r="3d" class="${this.is3D ? 'on' : ''}">3D</button><button data-r="2d" class="${this.is3D ? '' : 'on'}">2D classique</button></div></div>
           <div class="section" style="margin-top:4px"><h3>Son et musique</h3>
             ${[['master', 'Volume général'], ['music', 'Musique'], ['sfx', 'Effets'], ['amb', 'Ambiance']].map(([k, l]) => `<label class="vol-row"><span>${l}</span><input type="range" min="0" max="100" value="${Math.round(this.sound.vol[k] * 100)}" data-vol="${k}"><span>${Math.round(this.sound.vol[k] * 100)} %</span></label>`).join('')}
             <div class="btns" style="justify-content:flex-start"><button class="btn small" data-m="music">${this.sound.musicOn ? '🎵 Couper la musique' : '🎵 Activer la musique'}</button><button class="btn small" data-m="next">⏭ Thème suivant</button><span style="font-size:12px;color:var(--muted);align-self:center;font-family:var(--serif);font-style:italic">${this.sound.music && this.sound.music.title ? '♪ ' + esc(this.sound.music.title) : ''}</span></div>
@@ -1246,13 +1362,6 @@ window.DZ = window.DZ || {};
           <button class="btn danger" data-m="reset">🔄 Recommencer une partie</button>
         </div><div class="btns"><button class="btn" data-close>Fermer</button></div>`, (card) => {
         card.querySelectorAll('[data-q]').forEach((b) => b.addEventListener('click', () => { this.onQuality(b.dataset.q, true); card.querySelectorAll('[data-q]').forEach((x) => x.classList.toggle('on', x === b)); }));
-        card.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => {
-          const want = b.dataset.r;
-          if ((want === '3d') === !!this.is3D) return;
-          const s = DZ.Save.settings(); s.renderer = want; DZ.Save.setSettings(s);
-          DZ.Save.save(this.game);
-          location.reload();
-        }));
         card.querySelectorAll('[data-vol]').forEach((inp) => inp.addEventListener('input', () => {
           this.sound.init();
           const v = {}; v[inp.dataset.vol] = inp.value / 100; this.sound.setVolumes(v);
@@ -1296,10 +1405,11 @@ window.DZ = window.DZ || {};
         <p>Ajoutez des <b>toilettes</b>, des <b>restaurants</b> et des <b>poubelles</b> pour garder des visiteurs satisfaits. La <b>note du parc</b> dépend de leur satisfaction, de la propreté, de la diversité des espèces, de la qualité des enclos et du bien-être des animaux. Elle débloque de nouvelles espèces.</p>
         <p>⚠️ Les <b>carnivores</b> ne cohabitent qu'avec leur propre espèce : ils chassent les autres (les petites espèces et les bébés surtout ; les grandes se défendent) et se battent avec les autres prédateurs. Les grands prédateurs peuvent s'évader d'une simple palissade.</p>
         <p>🌉 Une <b>passerelle</b> relie deux enclos terrestres face à face (onglet Enclos, ou panneau de l'enclos) : les dinosaures passent de l'un à l'autre, au-dessus des allées. 🔗 Deux enclos terrestres qui se touchent peuvent être <b>réunis</b> en un seul. ⚔️ Deux <b>mâles adultes</b> d'une même espèce finissent par se battre, surtout chez les espèces territoriales : le vaincu peut être blessé ; une passerelle lui permet de s'éloigner.</p>
+        <p>🔭 Une <b>passerelle d'observation</b> (onglet Chemins) fait passer les visiteurs au-dessus d'un enclos : la meilleure vue sur les dinosaures. 🛝 Les <b>aires de jeux</b> (onglet Services) amusent les enfants et rendent les familles plus heureuses. 🚁 Pour changer un dinosaure d'enclos, sélectionnez-le puis <b>Transférer</b> : une vétérinaire l'endort et un hélicoptère le dépose dans son nouvel enclos.</p>
         <div class="keys">
           <kbd>Clic gauche</kbd> sélectionner / construire · <kbd>Clic droit</kbd> ou <kbd>Échap</kbd> annuler l'outil<br>
           <kbd>Glisser</kbd> déplacer la vue · <kbd>Molette</kbd> zoomer / dézoomer · <kbd>Flèches</kbd> / <kbd>ZQSD</kbd> / <kbd>WASD</kbd> se déplacer<br>
-          ${this.is3D ? '<kbd>Clic droit glissé</kbd> ou <kbd>Ctrl + glisser</kbd> tourner et incliner la caméra · <kbd>[</kbd> <kbd>]</kbd> pivoter · <kbd>Début</kbd> recentrer<br>' : ''}
+          <kbd>Clic droit glissé</kbd> ou <kbd>Ctrl + glisser</kbd> tourner et incliner la caméra · <kbd>[</kbd> <kbd>]</kbd> pivoter · <kbd>Début</kbd> recentrer<br>
           <b>Écran tactile :</b> un doigt pour déplacer la vue · deux doigts pour zoomer et tourner la carte · deux doigts glissés vers le haut ou le bas pour l'incliner · appui long pour les informations · toucher l'onglet ouvert pour replier la barre · 🧭 pour remettre le nord en haut<br>
           <kbd>Espace</kbd> pause · <kbd>1</kbd> vitesse normale · <kbd>2</kbd> rapide · <kbd>3</kbd> très rapide · <kbd>N</kbd> minicarte<br>
           <kbd>C</kbd> chemin · <kbd>V</kbd> sélection · <kbd>M</kbd> déplacer · <kbd>X</kbd> démolir · <kbd>Suppr</kbd> démolir la sélection
@@ -1334,6 +1444,8 @@ window.DZ = window.DZ || {};
       g.on('kill', () => this.sound.crowdReact(g.s.rating >= 3.5 ? 'ooh' : 'peur'));
       g.on('constructed', (b) => { if (C.buildings[b.type].cat !== 'deco') this.sound.play('upgrade'); });
       g.on('mapChanged', () => { this.mmDirty = true; });
+      g.on('dart', (tr) => this.sound.play('dart', { pos: this.pos3(tr.d.x, tr.d.y, 0.4) }));
+      g.on('transferred', (tr) => { if (this.panelSel && this.panelSel.kind === 'dino' && this.panelSel.id === tr.d.id) this.renderPanel(); });
     }
 
     update(dt) {
@@ -1351,7 +1463,7 @@ window.DZ = window.DZ || {};
         this.refreshItems();
         this.sound.setEnv(this.game.s.hour, this.game.stormIntensity());
         if (this.game.speed) {
-          const cx = this.r.is3D ? this.r.cam.tx : this.r.cam.x / T, cz = this.r.is3D ? this.r.cam.tz : this.r.cam.y / T;
+          const cx = this.r.cam.tx, cz = this.r.cam.tz;
           for (const id in this.game.buildings) {
             const b = this.game.buildings[id];
             if (!this.game.busy(b) || C.buildings[b.type].cat === 'deco') continue;
@@ -1423,6 +1535,8 @@ window.DZ = window.DZ || {};
       }
       x.fillStyle = '#8a6545';
       for (const id in g.s.links) { const l = g.s.links[id]; x.fillRect(l.x, l.y, Math.max(1, l.w), Math.max(1, l.h)); }
+      x.fillStyle = '#f4ead2';
+      for (const r of g.skyRuns()) x.fillRect(r.x, r.y, r.w, r.h);
       this.mmPark = c;
     }
     const cv = this.mmCanvas, x = cv.getContext('2d');

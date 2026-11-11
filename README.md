@@ -6,7 +6,7 @@ Un jeu de gestion de parc de dinosaures en 3D qui tourne dans le navigateur, en 
 
 Ouvrez `index.html` dans un navigateur récent (Chrome, Edge, Firefox ou Safari). C'est tout.
 
-Le jeu s'affiche en 3D. Si le navigateur ne gère pas WebGL 2, il bascule automatiquement sur l'ancien rendu 2D. Le menu ☰ permet aussi de choisir l'affichage (3D ou 2D classique).
+Le jeu se joue en 3D et demande un navigateur qui gère WebGL 2 (tous les navigateurs récents, avec l'accélération matérielle activée). Sans WebGL 2, l'écran de chargement l'indique.
 
 ## But du jeu
 
@@ -19,7 +19,10 @@ Construisez des chemins depuis l'entrée, des enclos reliés à ces chemins, pui
 - **Des chantiers qui prennent du temps** selon le prix, et des dinosaures **livrés par hélicoptère**.
 - **Des naissances** : un mâle et une femelle heureux de la même espèce ont des petits, qui grandissent.
 - **Des passerelles** entre enclos (les dinosaures passent au-dessus des allées), des **enclos réunis** quand ils se touchent, et des **combats entre mâles** chez les espèces territoriales.
-- **3 niveaux** pour chaque enclos, boutique, restaurant et toilettes.
+- **Des passerelles d'observation** pour les visiteurs, au-dessus des enclos : la meilleure vue sur les dinosaures.
+- **Des aires de jeux** pour les enfants : balançoires, toboggan, dino à grimper.
+- **Des transferts** : une vétérinaire endort le dinosaure, un hélicoptère l'emporte dans un filet jusqu'à son nouvel enclos.
+- **3 niveaux** pour chaque enclos, boutique, restaurant, toilettes et aire de jeux.
 - Événements aléatoires : affluence, orages, maladies, critiques, mécènes… et évasions si vos clôtures sont trop faibles.
 - Cycle jour et nuit, météo.
 - **Son 3D haut de gamme**, entièrement synthétisé : voix propres à chaque espèce, pluie, vent et tonnerre d'orage, vagues, rivière, oiseaux, insectes, foule de visiteurs.
@@ -59,10 +62,10 @@ js/config.js        équilibrage et palette (à modifier pour rééquilibrer)
 js/dinos.js         données des espèces
 js/util.js          outils (aléatoire, bruit, couleurs)
 js/game.js          logique de jeu (sans rendu)
-js/habitats.js      passerelles, enclos réunis, combats entre mâles
+js/habitats.js      passerelles, enclos réunis, combats entre mâles, prédation
+js/amenities.js     passerelles d'observation, aires de jeux, transferts de dinosaures
 js/r3d/             rendu 3D WebGL 2 : socle (maths, shaders), maillages, terrain et eau,
                     modèles (bâtiments, arbres, visiteurs), dinosaures articulés, moteur
-js/render/          rendu 2D de secours (et dessins des vignettes 2D, bulles d'humeur)
 js/audio.js         environnement sonore 3D (Web Audio)
 js/music.js         orchestre de synthèse et thèmes musicaux
 js/save.js          sauvegarde locale

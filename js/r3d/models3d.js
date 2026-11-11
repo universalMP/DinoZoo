@@ -218,6 +218,31 @@
     mb.push().t(x, y - 0.015, z).box(w + 0.03, 0.02, 0.02).pop();
   }
 
+  /* Sol d'une aire de jeux : sable, puis sol souple ; banc et fleurs aux niveaux supérieurs. */
+  function playPad(mb, w, h, lv) {
+    mb.material('ground').col(lv === 1 ? '#d8c6a0' : lv === 2 ? '#b5523a' : '#3f7a5a');
+    mb.push().t(w / 2, 0.012, h / 2).box(w - 0.16, 0.02, h - 0.16).pop();
+    mb.material('wood').col('#6e4c30');
+    mb.push().t(w / 2, 0.03, 0.09).box(w - 0.1, 0.06, 0.05).pop(); mb.push().t(w / 2, 0.03, h - 0.09).box(w - 0.1, 0.06, 0.05).pop();
+    mb.push().t(0.09, 0.03, h / 2).box(0.05, 0.06, h - 0.1).pop(); mb.push().t(w - 0.09, 0.03, h / 2).box(0.05, 0.06, h - 0.1).pop();
+    if (lv >= 2) {
+      mb.push().t(w - 0.3, 0, h - 0.22).s(0.6);
+      mb.material('wood');
+      for (let i = 0; i < 3; i++) mb.col(i % 2 ? '#a87e54' : '#9a7048').push().t(0, 0.14, -0.07 + i * 0.07).box(0.7, 0.025, 0.06).pop();
+      mb.material('metal').col('#2f3438');
+      for (const x of [-0.3, 0.3]) mb.push().t(x, 0, 0).box(0.04, 0.14, 0.2).pop();
+      mb.pop();
+    }
+    if (lv === 3) {
+      const r = U.rng(w * 7 + h);
+      for (let i = 0; i < 6; i++) { mb.material('plain').col(['#e6bb5c', '#c0472f', '#f2ead8'][i % 3]).push().t(0.18 + r() * 0.2, 0.06, 0.25 + r() * (h - 0.5)).sphere(0.03, 0.03, 0.03, 5, 3).pop(); }
+    }
+  }
+  function palmTuft(mb, x, z, r) {
+    mb.material('wood').col('#6b4c36').push().t(x, 0, z).cyl(0.035, 0.028, 0.55, 6).pop();
+    for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + r(); mb.material('foliage').col('#4b6d2f').push().t(x, 0.55, z).ry(a).rz(-0.5).t(0.16, 0, 0).box(0.32, 0.015, 0.07).pop(); }
+  }
+
   const builders = {
     boutique(mb, lv, out) {
       const r = U.rng(11 + lv);
@@ -342,6 +367,71 @@
       mb.material('metal').col('#5c6368');
       for (let i = 0; i < 3; i++) mb.push().t(1.1 + i * 0.4, 0, 1.2).box(0.06, 0.24, 0.3).pop();
       out.lights.push([2.7, 0.4, 0.9, 1.0]);
+    },
+    /* Aires de jeux (les balançoires et les enfants sont animés à part). */
+    balancoires(mb, lv) {
+      playPad(mb, 2, 2, lv);
+      const S = DZ.PLAY.SWING;
+      if (lv === 1) mb.material('wood').col('#7a5636'); else mb.material('metal').col(lv === 2 ? '#3d7a4a' : '#2f6a8a');
+      for (const x of [0.2, 1.8]) for (const dz of [-0.4, 0.4]) mb.tube([[x, 0, S.z + dz], [x, S.top + 0.02, S.z]], 0.025, 0.022, 6);
+      mb.tube([[0.15, S.top, S.z], [1.85, S.top, S.z]], 0.028, 0.028, 8);
+      if (lv === 3) { mb.material('plain').col('#d7a84a'); for (const x of [0.15, 1.85]) mb.push().t(x, S.top, S.z).sphere(0.04, 0.04, 0.04, 6, 4).pop(); }
+    },
+    toboggan(mb, lv) {
+      playPad(mb, 2, 3, lv);
+      const col = lv === 1 ? '#d9a83c' : lv === 2 ? '#c0472f' : '#3a6ea5';
+      // tour et plateforme
+      mb.material(lv === 1 ? 'wood' : 'metal').col(lv === 1 ? '#7a5636' : '#5c6368');
+      for (const x of [0.72, 1.28]) for (const z of [0.32, 0.78]) mb.push().t(x, 0, z).box(0.05, 1.18, 0.05).pop();
+      mb.material('wood').col('#8a6545').push().t(1, 0.76, 0.55).box(0.62, 0.05, 0.5).pop();
+      mb.material('metal').col('#5c6368');
+      for (const x of [0.72, 1.28]) mb.push().t(x, 1.0, 0.55).box(0.03, 0.03, 0.46).pop();
+      // toit pointu
+      mb.material('plain').col(col).push().t(1, 1.18, 0.55).cone(0.42, 0.32, 4).pop();
+      // échelle à l'arrière
+      mb.material('metal').col('#5c6368');
+      for (const x of [0.86, 1.14]) mb.tube([[x, 0, 0.22], [x, 0.8, 0.34]], 0.014, 0.014, 4);
+      for (let k = 1; k <= 5; k++) { const u = k / 6; mb.push().t(1, u * 0.8, 0.22 + u * 0.12).box(0.28, 0.018, 0.018).pop(); }
+      // glissade (droite, comme le trajet des enfants) et réception
+      const z0 = 0.78, y0 = 0.78, z1 = 2.55, y1 = 0.08, L = Math.hypot(z1 - z0, y0 - y1), a = Math.atan2(y0 - y1, z1 - z0);
+      mb.material('plain').col(col);
+      mb.push().t(1, (y0 + y1) / 2, (z0 + z1) / 2).rx(a).box(0.34, 0.03, L).pop();
+      for (const sx of [-0.17, 0.17]) mb.push().t(1 + sx, (y0 + y1) / 2 + 0.05, (z0 + z1) / 2).rx(a).box(0.025, 0.1, L).pop();
+      mb.push().t(1, y1 - 0.005, z1 + 0.12).box(0.34, 0.03, 0.26).pop();
+      mb.material('metal').col('#5c6368');
+      for (const z of [1.4, 2.1]) { const yy = y0 + (y1 - y0) * (z - z0) / (z1 - z0); for (const sx of [-0.15, 0.15]) mb.push().t(1 + sx, 0, z).box(0.035, yy, 0.035).pop(); }
+    },
+    fauxdino(mb, lv) {
+      playPad(mb, 3, 3, lv);
+      const skin = lv === 3 ? '#4f8a6a' : '#5d8139', spot = lv === 1 ? '#4b6d2f' : '#d7a84a';
+      mb.material('plain').col(skin);
+      // pattes, corps, cou, tête
+      for (const sx of [-0.28, 0.28]) for (const z of [1.15, 1.78]) mb.push().t(1.5 + sx, 0, z).cyl(0.1, 0.09, 0.42, 8).pop();
+      mb.push().t(1.5, 0.55, 1.45).sphere(0.45, 0.32, 0.64, 14, 9).pop();
+      mb.tube([[1.5, 0.66, 0.98], [1.5, 1.05, 0.7], [1.5, 1.42, 0.48]], 0.14, 0.085, 8);
+      mb.push().t(1.5, 1.5, 0.4).sphere(0.12, 0.1, 0.17, 10, 7).pop();
+      mb.material('plain').col('#f2ead8');
+      for (const sx of [-0.08, 0.08]) mb.push().t(1.5 + sx, 1.55, 0.33).sphere(0.03, 0.03, 0.03, 6, 4).pop();
+      mb.col('#1a120c');
+      for (const sx of [-0.095, 0.095]) mb.push().t(1.5 + sx, 1.555, 0.315).sphere(0.014, 0.014, 0.014, 5, 3).pop();
+      mb.col('#c0472f').push().t(1.5, 1.45, 0.25).box(0.1, 0.012, 0.03).pop();
+      // taches
+      const r = U.rng(41 + lv);
+      mb.col(spot);
+      for (let i = 0; i < (lv === 1 ? 6 : 11); i++) { const a = r() * TAU, k = 0.3 + r() * 0.6; mb.push().t(1.5 + Math.cos(a) * 0.43 * Math.sqrt(1 - k * k), 0.55 + k * 0.31, 1.45 + Math.sin(a) * 0.55).sphere(0.06, 0.02, 0.06, 6, 3).pop(); }
+      if (lv === 3) { mb.col('#d7a84a'); for (let i = 0; i < 6; i++) { const u = i / 5; mb.push().t(1.5, 0.84 + u * 0.55 - Math.max(0, u - 0.5) * 0.1, 1.55 - u * 0.95).cone(0.07, 0.13, 4).pop(); } }
+      // queue-toboggan
+      const z0 = 2.0, y0 = 0.84, z1 = 2.9, y1 = 0.08, L = Math.hypot(z1 - z0, y0 - y1), a = Math.atan2(y0 - y1, z1 - z0);
+      mb.col(skin).push().t(1.5, (y0 + y1) / 2 - 0.03, (z0 + z1) / 2).rx(a).box(0.36, 0.06, L).pop();
+      mb.col(lv === 1 ? '#d9a83c' : '#e6bb5c').push().t(1.5, (y0 + y1) / 2 + 0.005, (z0 + z1) / 2).rx(a).box(0.28, 0.02, L).pop();
+      mb.col(skin);
+      for (const sx of [-0.17, 0.17]) mb.push().t(1.5 + sx, (y0 + y1) / 2 + 0.04, (z0 + z1) / 2).rx(a).box(0.04, 0.1, L).pop();
+      // filet d'escalade sur le flanc
+      mb.material('cloth').col('#c9a06a');
+      for (let k = 0; k < 5; k++) { const z = 1.15 + k * 0.13; mb.tube([[2.62, 0, z], [1.95, 0.86, z + 0.03]], 0.008, 0.008, 3); }
+      for (let k = 1; k < 5; k++) { const u = k / 5; mb.tube([[2.62 - u * 0.67, u * 0.86, 1.15], [2.62 - u * 0.67, u * 0.86, 1.71]], 0.008, 0.008, 3); }
+      if (lv >= 2) palmTuft(mb, 0.35, 0.35, r);
+      if (lv === 3) palmTuft(mb, 2.7, 2.65, r);
     },
     poubelle(mb) {
       mb.material('metal').col('#3d5a3a').push().t(0.5, 0, 0.5).cyl(0.09, 0.1, 0.24, 10).pop();
@@ -803,6 +893,84 @@
      piliers (jamais sur les allées), rampes dans chaque enclos et
      portiques à chaque entrée. deckY : hauteur absolue du tablier.
      ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------
+     Passerelles d'observation : escaliers aux deux bouts, tablier vitré
+     au-dessus des enclos, piliers et lampadaires.
+     ------------------------------------------------------------------ */
+  G.skyDeckY = function (game, world, r) {
+    let top = 0;
+    for (const id of r.encs) { const b = game.buildings[id]; if (b) top = Math.max(top, world.buildingHeight(b)); }
+    return top + C.skywalk.height;
+  };
+  /* Profil de l'escalier (même formule que game.skyLift) : s = distance à la clôture. */
+  G.skyProfile = (s) => s < 0 ? U.clamp((s + 0.5) / 0.5, 0, 1) * 0.45 : Math.min(1, 0.45 + 0.55 * s / 0.6);
+  G.skyInto = function (mb, glass, r, world, game, out) {
+    const L = r.len, half = 0.42, D = G.skyDeckY(game, world, r);
+    const toWorld = (u, v) => r.dir === 'x' ? [r.x + u, r.y + 0.5 + v] : [r.x + 0.5 - v, r.y + u];
+    const ground = (u, v) => { const p = toWorld(u, v || 0); return world.heightAt(p[0], p[1]); };
+    const Y = (u) => { const k = Math.min(G.skyProfile(u), G.skyProfile(L - u)); const gr = ground(u); return gr + (D - gr) * k; };
+    mb.push();
+    if (r.dir === 'x') mb.t(r.x, 0, r.y + 0.5); else mb.t(r.x + 0.5, 0, r.y).ry(-Math.PI / 2);
+    // escaliers : marches, flancs pleins, mains courantes
+    const stairs = (a, b) => {
+      const N = 10, du = (b - a) / N;
+      mb.material('wood');
+      for (let j = 0; j < N; j++) {
+        const u0 = a + j * du, u1 = u0 + du, top = Y(du > 0 ? u1 : u0);
+        mb.col(j % 2 ? '#8a6545' : '#7b583a').push().t((u0 + u1) / 2, top - 0.025, 0).box(Math.abs(du) + 0.012, 0.05, half * 2).pop();
+      }
+      mb.col('#5a4030');
+      const lo = Math.min(ground(a), ground(b)) - 0.05;
+      for (const s of [-1, 1]) {
+        const pa = [a, lo, s * half], pb = [b, lo, s * half], pc = [b, Y(b) - 0.04, s * half], pd = [a, Y(a) - 0.04, s * half];
+        if ((s > 0) === (b > a)) mb.face(pa, pb, pc, pd); else mb.face(pb, pa, pd, pc);
+      }
+      mb.material('metal').col('#3f474c');
+      for (const s of [-1, 1]) {
+        const pts = [];
+        for (let k = 0; k <= 6; k++) { const u = a + (b - a) * k / 6; pts.push([u, Y(u) + 0.55, s * (half + 0.02)]); }
+        mb.tube(pts, 0.016, 0.016, 4);
+        for (const k of [0, 3, 6]) { const u = a + (b - a) * k / 6; mb.push().t(u, Y(u), s * (half + 0.02)).box(0.03, 0.55, 0.03).pop(); }
+      }
+    };
+    stairs(-0.5, 0.6);
+    stairs(L + 0.5, L - 0.6);
+    // tablier
+    const d0 = 0.6, d1 = L - 0.6, DL = d1 - d0;
+    if (DL > 0) {
+      mb.material('wood').col('#8a6545').push().t((d0 + d1) / 2, D - 0.045, 0).box(DL + 0.02, 0.09, half * 2).pop();
+      mb.col('#6f5036');
+      for (let u = d0 + 0.2; u < d1; u += 0.4) mb.push().t(u, D + 0.001, 0).box(0.02, 0.002, half * 2 - 0.04).pop();
+      mb.material('metal').col('#4a5257');
+      for (const s of [-1, 1]) mb.push().t((d0 + d1) / 2, D - 0.16, s * (half - 0.03)).box(DL + 0.04, 0.14, 0.07).pop();
+      const n = Math.max(2, Math.round(DL / 0.55));
+      for (const s of [-1, 1]) {
+        mb.material('metal').col('#3f474c');
+        for (let i = 0; i <= n; i++) mb.push().t(d0 + DL * i / n, D, s * half).box(0.035, 0.6, 0.035).pop();
+        mb.push().t((d0 + d1) / 2, D + 0.6, s * half).box(DL + 0.03, 0.035, 0.07).pop();
+        glass.push(); glass.m = G.m4.copy(mb.m); glass.material('glass').col('#bfe0ea');
+        if (s > 0) glass.face([d0, D + 0.04, s * half], [d1, D + 0.04, s * half], [d1, D + 0.58, s * half], [d0, D + 0.58, s * half]);
+        else glass.face([d1, D + 0.04, s * half], [d0, D + 0.04, s * half], [d0, D + 0.58, s * half], [d1, D + 0.58, s * half]);
+        glass.pop();
+      }
+      // piliers tous les deux mètres, lampadaires tous les quatre
+      for (let u = 1.5, k = 0; u < L - 1; u += 2, k++) {
+        mb.material('stone').col('#a9a59b');
+        for (const s of [-1, 1]) { const g = ground(u, s * (half - 0.12)); mb.push().t(u, g - 0.05, s * (half - 0.12)).cyl(0.07, 0.09, D - 0.2 - g + 0.05, 8).pop(); }
+        mb.material('metal').col('#4a5257').push().t(u, D - 0.28, 0).box(0.1, 0.09, half * 2).pop();
+        if (k % 2 === 0) {
+          const s = k % 4 === 0 ? 1 : -1;
+          mb.material('metal').col('#2f3438').push().t(u, D + 0.6, s * half).cyl(0.02, 0.02, 0.35, 5).pop();
+          mb.material('emissive').col('#ffe6a8').push().t(u, D + 0.97, s * half).sphere(0.04, 0.05, 0.04, 6, 4).pop();
+          const p = toWorld(u, s * half);
+          out.lights.push([p[0], D + 0.97, p[1], 1.8]);
+        }
+      }
+    }
+    mb.pop();
+    return D;
+  };
+
   G.linkDeckY = function (game, world, l) {
     const A = game.buildings[l.a], B = game.buildings[l.b], K = C.links;
     let top = Math.max(A ? world.buildingHeight(A) : 0, B ? world.buildingHeight(B) : 0);

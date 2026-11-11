@@ -1,7 +1,7 @@
 /* =====================================================================
    DinoZoo 3D — Dinosaures articulés.
    Chaque espèce reprend les proportions et couleurs définies dans
-   DZ.DINO_ART (render/dinoart.js) et les traduit en pièces 3D : corps,
+   DZ.DINO_ART (r3d/art.js) et les traduit en pièces 3D : corps,
    segments de cou et de queue, tête, mâchoire, cuisses, jambes, pieds,
    bras, et attributs (plaques, cornes, collerette, voile, massue…).
    Les pièces sont des « lofts » à peau motivée (rayures, taches,
@@ -11,7 +11,7 @@
   const G = DZ.G, U = DZ.util;
   const MB = G.MB;
   const TAU = Math.PI * 2;
-  const K = 1 / 40; // pixels du dessin 2D → unités 3D
+  const K = 1 / 40; // unités de DZ.DINO_ART → unités 3D
 
   const c01 = (hex) => G.rgb01(hex);
   const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];

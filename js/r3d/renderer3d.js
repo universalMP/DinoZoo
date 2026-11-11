@@ -5,13 +5,14 @@
    cycle jour/nuit avec lampes, eau animée, instanciation (arbres,
    herbe, visiteurs), dinosaures articulés, particules, calque 2D
    (bulles d'humeur, pluie, éclairs, vignettage) et vignettes 3D.
-   Même interface publique que le moteur 2D : l'interface et la
-   logique de jeu ne changent pas.
+   L'interface parle en « pixels monde » (case × C.map.tile) : voir
+   screenToWorld / worldToScreen / focus.
    ===================================================================== */
 (function () {
   const G = DZ.G, U = DZ.util, C = DZ.CONFIG, R = DZ.R, M4 = G.m4;
   const T = C.map.tile, W = C.map.w, H = C.map.h;
   const TAU = Math.PI * 2;
+  const ease = (u) => u * u * (3 - 2 * u);
   const QUALITY = {
     high: { shadow: 2048, scale: 1.0, tufts: 6, jungle: 0.32, particles: 600, maxGroups: 'high', godRays: true },
     medium: { shadow: 1024, scale: 0.85, tufts: 3, jungle: 0.2, particles: 300, maxGroups: 'medium', godRays: false },
@@ -106,7 +107,9 @@
 
       game.on('mapChanged', (r) => { this.world.markDirty(r); this._dirtyWorld = true; });
       game.on('reset', () => { this.world.markDirty(null); this._dirtyWorld = true; this._dirtyStatic = true; this.dinoState.clear(); this.world.noise = null; this.world.ridge = null; if (this.far) { G.free(this.gl, this.far.water); G.free(this.gl, this.far.land); this.far = null; } });
-      for (const ev of ['built', 'upgraded', 'moved', 'merged', 'linkBuilt', 'linkDone', 'linkRemoved']) game.on(ev, () => { this._dirtyStatic = true; });
+      for (const ev of ['built', 'upgraded', 'moved', 'merged', 'linkBuilt', 'linkDone', 'linkRemoved', 'skyBuilt', 'skyRemoved']) game.on(ev, () => { this._dirtyStatic = true; });
+      game.on('dart', (tr) => { const v = tr.vet; if (v) this.addP({ k: 'spark', x: (v.x + tr.d.x) / 2, y: this.world.heightAt(tr.d.x, tr.d.y) + 0.4, z: (v.y + tr.d.y) / 2, vx: 0, vy: 0.3, vz: 0, life: 0, max: 0.5, s: 0.07 }); });
+      game.on('transferred', (tr) => this.burst3(tr.d.x, tr.d.y, 0.6, 'dust'));
       game.on('kill', (e) => { this.burst3(e.prey.x, e.prey.y, 0.6, 'dust'); });
       game.on('clash', (e) => {
         const big = C.dinos[e.sp].space;
@@ -214,7 +217,7 @@
       if (p[3] <= 0.01) return null;
       return { x: (p[0] / p[3] * 0.5 + 0.5) * this.vw, y: (0.5 - p[1] / p[3] * 0.5) * this.vh, w: p[3] };
     }
-    /* Interface compatible avec le moteur 2D (coordonnées « pixels monde ») */
+    /* Conversions écran ↔ « pixels monde » (case × C.map.tile), utilisées par l'interface */
     screenToWorld(sx, sy) {
       const g = this.groundAt(sx, sy) || [this.cam.tx, this.cam.tz];
       return { x: g[0] * T, y: g[1] * T };
@@ -371,7 +374,7 @@
         const b = g.buildings[id];
         if (b.x + b.w < c.x0 || b.x > c.x1 || b.y + b.h < c.y0 || b.y > c.y1) continue;
         if (b.type === 'arbre' || b.type === 'palmier' || b.type === 'fougere') extra.push([b.type === 'arbre' ? 'araucaria' : b.type, b.seed, b.x + 0.5, b.y + 0.55, 1.1]);
-        else if (g.isEnclosure(b)) for (const d of G.enclosureDecor(b, g.gatesOf(b))) if (d.t === 'tree') extra.push([d.k, d.sd, d.x, d.z, d.sc]);
+        else if (g.isEnclosure(b)) for (const d of G.enclosureDecor(b, g.gatesOf(b).concat(g.skyRects(b)))) if (d.t === 'tree') extra.push([d.k, d.sd, d.x, d.z, d.sc]);
       }
       const groups = {};
       for (const t of w.chunkTrees(c, extra)) { const key = t[0] + (t[1] % 2); (groups[key] = groups[key] || { kind: t[0], v: t[1] % 2, list: [] }).list.push(t); }
@@ -435,7 +438,7 @@
           const out = G.enclosureInto(mb, glass, b, w);
           glass.pop(); mb.pop();
           for (const l of out.lights) this.lights.push([l[0], l[1] + h, l[2], l[3]]);
-          for (const d of G.enclosureDecor(b, g.gatesOf(b))) if (d.t === 'rock') G.rockInto(mb, d.x, w.heightAt(d.x, d.z), d.z, d.size, d.sd);
+          for (const d of G.enclosureDecor(b, g.gatesOf(b).concat(g.skyRects(b)))) if (d.t === 'rock') G.rockInto(mb, d.x, w.heightAt(d.x, d.z), d.z, d.size, d.sd);
         } else if (b.type !== 'arbre' && b.type !== 'palmier' && b.type !== 'fougere') {
           mb.push().t(b.x, h, b.y);
           const out = G.buildingInto(mb, b);
@@ -452,6 +455,15 @@
         this.linkDeck.set(l.id, G.linkDeckY(g, w, l));
         if (l.cons) continue;
         const out = G.linkInto(mb, glass, l, w, g, { lights: [] });
+        for (const li of out.lights) this.lights.push(li);
+      }
+      // passerelles d'observation : hauteur du tablier par case (escaliers compris)
+      this.skyDeck = new Float32Array(W * H);
+      for (const r of g.skyRuns()) {
+        const out = { lights: [] };
+        const D = G.skyInto(mb, glass, r, w, g, out);
+        for (let k = 0; k < r.len; k++) this.skyDeck[(r.y + (r.dir === 'y' ? k : 0)) * W + r.x + (r.dir === 'x' ? k : 0)] = D;
+        for (const e of r.ends) if (e[0] >= 0 && e[1] >= 0 && e[0] < W && e[1] < H) this.skyDeck[e[1] * W + e[0]] = D;
         for (const li of out.lights) this.lights.push(li);
       }
       this.static = mb.empty ? null : G.upload(gl, mb.finish());
@@ -502,11 +514,16 @@
       const x = d.x, z = d.y;
       let gy = this.world.heightAt(x, z);
       if (d.crossK > 0 && d.cross && this.linkDeck && this.linkDeck.has(d.cross.l)) gy += (this.linkDeck.get(d.cross.l) - gy) * d.crossK;
+      // transfert : il monte dans le filet, sous l'hélicoptère
+      let lift = 0, hangTop = 0;
+      if (d.tr && d.tr.lift > 0) { const hp = this.game.transferPose(d.tr); if (hp) { lift = ease(d.tr.lift); hangTop = this.heliY(hp) - 0.75; } }
+      const sleep = d.sleep || 0;
       const root = M4.create();
       const seedT = t + d.id * 3.1;
       const kAge = this.game.dinoScale ? this.game.dinoScale(d) : 1;
       if (sp.habitat === 'air') {
         const alt = 0.75 + (d.alt - 18) / 22 * 0.55;
+        if (lift) gy += (hangTop - 0.25 - alt - gy) * lift;
         M4.translate(root, x, gy + alt, z); M4.rotY(root, -st.heading); if (kAge < 1) M4.scale(root, kAge, kAge, kAge);
         const flap = d.phase ? Math.sin(d.phase) * 0.55 : 0.05;
         out.push([rig.body, root]);
@@ -516,7 +533,8 @@
         return { x, y: gy + alt, z, r: rig.span * 0.6, h: 0.2, shadowY: gy };
       }
       if (sp.habitat === 'water') {
-        const y = G.WATER_Y - 0.13 + d.surf * 0.14;
+        let y = G.WATER_Y - 0.13 + d.surf * 0.14;
+        if (lift) y += (hangTop - 0.3 - y) * lift;
         M4.translate(root, x, y, z); M4.rotY(root, -st.heading); if (kAge < 1) M4.scale(root, kAge, kAge, kAge);
         const ph = d.phase || 0;
         if (rig.plan === 'plesio') {
@@ -540,18 +558,20 @@
             M4.translate(m, -rig.segs[i].len, 0, 0);
           }
         }
-        return { x, y, z, r: rig.len * 0.5, h: 0.1, underwater: true };
+        return { x, y, z, r: rig.len * 0.5, h: 0.1, underwater: !lift, lifted: lift };
       }
       // --- terrestres ---
       const moving = d.moving > 0;
       const phase = d.phase || 0;
       const state = d.state || 'idle';
-      const rest = state === 'rest';
+      const rest = state === 'rest' || sleep > 0.3;
+      if (lift) gy += (hangTop - rig.height * kAge - gy) * lift;
       const bob = moving ? -Math.abs(Math.sin(phase)) * (rig.quad ? 0.012 : 0.03) : Math.sin(seedT * 1.7) * 0.004;
       M4.translate(root, x, gy, z); M4.rotY(root, -st.heading); if (kAge < 1) M4.scale(root, kAge, kAge, kAge);
       const hip = M4.copy(root);
-      M4.translate(hip, 0, rig.hipH + bob - (rest ? rig.hipH * 0.2 : 0), 0);
+      M4.translate(hip, 0, rig.hipH + bob - (rest ? rig.hipH * 0.2 : 0) - sleep * rig.hipH * 0.32 * (1 - lift), 0);
       if (moving) M4.rotZ(hip, Math.sin(phase * 2) * 0.012);
+      if (sleep > 0) { M4.rotX(hip, sleep * 0.32 * (1 - lift) + (d.tr && d.tr.phase === 'drowsy' ? Math.sin(d.t * 5) * 0.08 * (1 - sleep) : 0)); }
       if (state === 'fight') { const k = d.fightK || 0; M4.rotZ(hip, (sp.fight === 'butt' ? -0.1 : 0.06) * k); if (sp.fight === 'tail') M4.rotY(hip, Math.sin(d.anim * 4) * 0.35); }
       const body = M4.copy(hip); M4.scale(body, 1, 1 + Math.sin(seedT * 1.7) * 0.012, 1 + Math.sin(seedT * 1.7) * 0.008);
       out.push([rig.body, body]);
@@ -612,7 +632,7 @@
         out.push([rig.arm.mesh, am]);
       }
       if (state === 'roar' && d.anim < 0.3 && C.dinos[d.sp].space >= 5 && Math.random() < 0.3) this.burst3(x, z, 0.3, 'dust');
-      return { x, y: gy, z, r: rig.len * 0.5 * kAge, h: rig.height * kAge, head: headPos };
+      return { x, y: gy, z, r: rig.len * 0.5 * kAge, h: rig.height * kAge, head: headPos, lifted: lift };
     }
 
     /* ------------------------------------------------------------------
@@ -759,11 +779,23 @@
       gl.drawElementsInstanced(gl.TRIANGLES, mesh.count, gl.UNSIGNED_INT, 0, mesh.instCount);
     }
 
+    /* Hauteur du sol sous un visiteur (passerelles d'observation comprises). */
+    walkY(x, z) {
+      const gy = this.world.heightAt(x, z);
+      const k = this.game.skyLift(x, z);
+      if (k <= 0 || !this.skyDeck) return gy;
+      const D = this.skyDeck[Math.floor(z) * W + Math.floor(x)];
+      return D ? gy + (D - gy) * k : gy;
+    }
+    heliY(p) { return Math.max(this.world.heightAt(U.clamp(p.x, 0, W - 1), U.clamp(p.y, 0, H - 1)), G.WATER_Y) + 0.6 + p.alt * 8.5; }
+
     /* Instances des visiteurs pour l'image courante. */
     buildPeople(t) {
       const g = this.game, gl = this.gl;
       let n = 0;
       for (const grp of g.visitors) if (!grp.hidden) n += grp.members.length;
+      const plays = [];
+      for (const id in g.buildings) { const b = g.buildings[id]; if (C.buildings[b.type].play && !b.cons && Math.abs(b.x - this.cam.tx) < this.cam.dist * 1.8 + 8 && Math.abs(b.y - this.cam.tz) < this.cam.dist * 1.8 + 8) { const ks = g.kidsAt(b); if (ks.length) { plays.push([b, ks]); n += ks.length; } } }
       if (!this.pBody || this.pBody.length < n * G.INST_FLOATS) { this.pBody = new Float32Array(Math.max(64, n * 1.5) * G.INST_FLOATS | 0); this.pLeg = new Float32Array(this.pBody.length * 2); }
       const m = M4.create(), lm = M4.create();
       let bi = 0, li = 0;
@@ -777,9 +809,10 @@
         const ang = Math.atan2(grp.dirX, grp.dirY);
         for (let i = 0; i < nm; i++) {
           const mem = grp.members[i];
+          if (grp.playing && mem.slot) continue; // sur les jeux
           const off = (i - (nm - 1) / 2) * 0.15;
           const x = grp.x + px * off - (mem.child ? grp.dirX * 0.05 : 0), z = grp.y + pz * off - (mem.child ? grp.dirY * 0.05 : 0);
-          const gy = this.world.heightAt(x, z) + 0.03;
+          const gy = this.walkY(x, z) + 0.03;
           const v = mem.v;
           const sc = mem.child ? 0.68 : 0.92 + (v % 17) / 17 * 0.18;
           const ph = grp.wd * 9 + mem.ph;
@@ -789,6 +822,27 @@
           this.writeInst(this.pBody, bi++, m, [hair[0], hair[1], hair[2], 0], shirt, pants, skin);
           for (const s of [-1, 1]) {
             M4.copy(m, lm); M4.translate(lm, s * 0.025, 0.15, 0); M4.rotX(lm, moving ? Math.sin(ph) * 0.55 * s : 0);
+            this.writeInst(this.pLeg, li++, lm, [1, 1, 1, 0], shirt, pants, skin);
+          }
+        }
+      }
+      // enfants sur les aires de jeux
+      for (const [b, ks] of plays) {
+        const h = this.world.buildingHeight(b);
+        for (const e of ks) {
+          const q = DZ.PLAY.kidPose(b.type, b.level, e.slot, t + e.t0 * 0);
+          const v = e.m.v, sc = 0.68;
+          M4.ident(m); M4.translate(m, b.x + q.x, h + q.y + 0.02, b.y + q.z); M4.rotY(m, q.ang);
+          if (q.swing) M4.rotX(m, q.swing);
+          M4.scale(m, sc, sc, sc);
+          const sit = q.pose === 'sit';
+          if (sit) M4.translate(m, 0, -0.15, -0.02);
+          const skin = SKIN[v % SKIN.length], shirt = SHIRT[(v >> 2) % SHIRT.length], pants = PANTS[(v >> 4) % PANTS.length], hair = HAIR[(v >> 5) % HAIR.length];
+          this.writeInst(this.pBody, bi++, m, [hair[0], hair[1], hair[2], 0], shirt, pants, skin);
+          const ph = t * 9 + e.slot * 2;
+          for (const s2 of [-1, 1]) {
+            M4.copy(m, lm); M4.translate(lm, s2 * 0.025, 0.15, 0);
+            M4.rotX(lm, sit ? -1.45 : q.pose === 'climb' ? Math.sin(ph) * 0.5 * s2 - 0.4 : Math.sin(ph) * 0.55 * s2);
             this.writeInst(this.pLeg, li++, lm, [1, 1, 1, 0], shirt, pants, skin);
           }
         }
@@ -835,6 +889,8 @@
       this.worksParts(parts);
       this.heliParts(parts, this.glassParts, t);
       this.avatarParts(parts, t);
+      this.vetParts(parts, t);
+      this.playParts(parts, t);
       this.buildPeople(t);
       this.updateParticles(dt * (speed ? Math.min(speed, 2) : 0.5), hour);
 
@@ -1023,7 +1079,7 @@
     heliParts(parts, glassParts, t) {
       const g = this.game;
       this.helis = [];
-      if (!g.s.deliveries.length) return;
+      if (!g.s.deliveries.length && !g.transfers.length) return;
       if (!this.heliM) { const HM = G.heliMeshes(); this.heliM = {}; for (const k in HM) this.heliM[k] = G.upload(this.gl, HM[k]); }
       const HM = this.heliM;
       for (const dl of g.s.deliveries) {
@@ -1048,6 +1104,104 @@
           this.addP({ k: 'dust', x: p.x + Math.cos(a) * r, y: ground + 0.05, z: p.y + Math.sin(a) * r, vx: Math.cos(a) * 1.4, vy: 0.08, vz: Math.sin(a) * 1.4, life: 0, max: 1.0, s: 0.3 });
         }
         this.helis.push({ id: dl.id, x: p.x, y, z: p.y, dl, phase: p.phase });
+      }
+      // transferts : le dinosaure endormi pend dans un filet sous l'hélicoptère
+      for (const tr of g.transfers) {
+        const p = g.transferPose(tr);
+        if (!p) continue;
+        const y = this.heliY(p), S = 1.15;
+        const ground = Math.max(this.world.heightAt(U.clamp(p.x, 0, W - 1), U.clamp(p.y, 0, H - 1)), G.WATER_Y);
+        const root = M4.create(); M4.translate(root, p.x, y, p.y); M4.rotY(root, -p.heading); M4.rotZ(root, -p.tilt); M4.scale(root, S, S, S);
+        parts.push([HM.body, root]); glassParts.push([HM.glass, root]);
+        const rot = M4.copy(root); M4.translate(rot, -0.05, 0.68, 0); M4.rotY(rot, t * 38); parts.push([HM.rotor, rot]);
+        const tl = M4.copy(root); M4.translate(tl, -1.5, 0.42, 0.04); M4.rotZ(tl, t * 55); parts.push([HM.tail, tl]);
+        const pose = (this.poses || []).find((q) => q.d === tr.d);
+        const loadTop = pose ? pose.y + (pose.h || 0.3) * 0.9 + (pose.underwater ? 0.25 : 0) : this.world.heightAt(tr.d.x, tr.d.y) + 0.5;
+        const hang = y - 0.05, drop = p.cable * Math.max(0, hang - loadTop);
+        if (drop > 0.03) { const cb = M4.create(); M4.translate(cb, p.x, hang, p.y); M4.scale(cb, 1, drop, 1); parts.push([HM.cable, cb]); }
+        // filet : quatre cordes du crochet jusque sous le ventre
+        if (pose && p.cable > 0.98 && (tr.lift > 0 || tr.phase === 'lift' || tr.phase === 'drop')) {
+          const st = this.dinoState.get(tr.d.id), hd = st ? st.heading : 0, ch = Math.cos(hd), sh = Math.sin(hd);
+          const top = [p.x, loadTop, p.y], rr = Math.max(0.12, pose.r * 0.7), yb = pose.y + (pose.underwater || pose.lifted !== undefined && DZ.SPECIES[tr.d.sp].habitat === 'water' ? 0 : (pose.h || 0.3) * 0.35);
+          for (const [a, c] of [[1, 0.55], [1, -0.55], [-1, 0.55], [-1, -0.55]]) {
+            const lx = a * rr * 0.8, lz = c * rr * 0.6;
+            this.rope(parts, HM.cable, top, [pose.x + lx * ch - lz * sh, yb, pose.z + lx * sh + lz * ch]);
+          }
+        }
+        if (y - ground < 5.5 && g.speed && Math.random() < 0.6) {
+          const a = Math.random() * TAU, r = 0.6 + Math.random() * 0.8;
+          this.addP({ k: 'dust', x: p.x + Math.cos(a) * r, y: ground + 0.05, z: p.y + Math.sin(a) * r, vx: Math.cos(a) * 1.4, vy: 0.08, vz: Math.sin(a) * 1.4, life: 0, max: 1.0, s: 0.3 });
+        }
+        this.helis.push({ id: 'T' + tr.id, x: p.x, y, z: p.y, tr, phase: p.phase });
+      }
+    }
+
+    /* Câble tendu de a (haut) à b (bas) : le maillage descend de 0 à -1 en y. */
+    rope(parts, mesh, a, b) {
+      const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], L = Math.hypot(dx, dy, dz);
+      if (L < 0.01) return;
+      const h = Math.hypot(dx, dz), m = M4.create();
+      M4.translate(m, a[0], a[1], a[2]);
+      if (h > 1e-4) { M4.rotY(m, Math.atan2(-dx, -dz)); M4.rotX(m, Math.atan2(h, -dy)); }
+      M4.scale(m, 1, L, 1);
+      parts.push([mesh, m]);
+    }
+
+    /* Vétérinaires : même silhouette que l'avatar « Vétérinaire ». */
+    vetParts(parts, t) {
+      const g = this.game;
+      this.vetPos = [];
+      if (!g.transfers.length) return;
+      if (!this.vetM) {
+        const M = G.avatarMeshes(2, 'f');
+        this.vetM = { sh: M.sh };
+        for (const k of ['body', 'leg', 'arm', 'kit']) this.vetM[k] = G.upload(this.gl, M[k]);
+        const gun = new G.MB(); gun.material('metal').col('#3a4046').push().t(0, -0.13, 0.03).box(0.016, 0.016, 0.12).pop(); gun.material('plain').col('#d8a040').push().t(0, -0.13, 0.09).box(0.01, 0.01, 0.02).pop();
+        this.vetM.gun = G.upload(this.gl, gun.finish());
+      }
+      const A = this.vetM, S = 1.3;
+      for (const tr of g.transfers) {
+        const v = tr.vet;
+        if (!v) continue;
+        const walking = v.state === 'walk', run = walking && v.speed > 4.2, ph = v.phase;
+        const crouch = v.act === 'care' && !walking ? 1 : 0;
+        const gy = this.world.heightAt(v.x, v.y) + 0.02;
+        const bob = walking ? Math.abs(Math.sin(ph)) * (run ? 0.035 : 0.016) : 0;
+        const root = M4.create();
+        M4.translate(root, v.x, gy + bob - crouch * 0.05, v.y); M4.rotY(root, Math.atan2(v.dirX, v.dirY)); M4.scale(root, S, S, S);
+        if (run) M4.rotX(root, 0.14); else if (crouch) M4.rotX(root, 0.25);
+        parts.push([A.body, root]);
+        const legAmp = walking ? (run ? 0.9 : 0.55) : 0;
+        for (const sd of [-1, 1]) { const lm = M4.copy(root); M4.translate(lm, sd * 0.026, 0.15, 0); M4.rotX(lm, Math.sin(ph) * legAmp * sd - crouch * 0.5); parts.push([A.leg, lm]); }
+        let armX = walking ? Math.sin(ph) * legAmp * 0.8 : -0.4, tool = null;
+        if (v.act === 'aim' && !walking) { armX = -1.55 + Math.sin(v.anim * 2) * 0.02; tool = A.gun; }
+        else if (crouch) { armX = -1.15 + Math.sin(v.anim * 4) * 0.12; tool = A.kit; }
+        const am = M4.copy(root); M4.translate(am, A.sh + 0.006, 0.272, 0); M4.rotZ(am, 0.14); M4.rotX(am, armX);
+        parts.push([A.arm, am]);
+        if (tool) parts.push([tool, am]);
+        this.vetPos.push({ x: v.x, y: gy, z: v.y, head: gy + 0.43 * S, tr });
+      }
+    }
+
+    /* Aires de jeux : balançoires animées (les enfants sont des instances de visiteurs). */
+    playParts(parts, t) {
+      const g = this.game, R2 = this.cam.dist * 2 + 10;
+      if (!this.seatMesh) {
+        const sm = new G.MB(), Sw = DZ.PLAY.SWING;
+        sm.material('metal').col('#5c6368');
+        for (const sx of [-0.07, 0.07]) sm.push().t(sx, -Sw.chain, 0).cyl(0.006, 0.006, Sw.chain, 4).pop();
+        sm.material('plain').col('#c0472f').push().t(0, -Sw.chain - 0.012, 0).box(0.18, 0.025, 0.08).pop();
+        this.seatMesh = G.upload(this.gl, sm.finish());
+      }
+      for (const id in g.buildings) {
+        const b = g.buildings[id];
+        if (b.type !== 'balancoires' || b.cons) continue;
+        if (Math.abs(b.x - this.cam.tx) > R2 || Math.abs(b.y - this.cam.tz) > R2) continue;
+        const h = this.world.buildingHeight(b), busy = new Set(g.kidsAt(b).map((e) => e.slot));
+        DZ.PLAY.seats(b.type, b.level).forEach((sx, i) => {
+          const m = M4.create(); M4.translate(m, b.x + sx, h + DZ.PLAY.SWING.top, b.y + DZ.PLAY.SWING.z); M4.rotX(m, DZ.PLAY.swingAngle(i, t, busy.has(i)));
+          parts.push([this.seatMesh, m]);
+        });
       }
     }
 
@@ -1153,6 +1307,10 @@
       if (l.dir === 'x') { this.drawRect(lit, l.x - K.ramp, l.y, l.w + K.ramp * 2, l.h, col, alpha * 0.45, 0.09); if (l.w) this.drawRect(lit, l.x, l.y, l.w, l.h, col, alpha, 0.1); }
       else { this.drawRect(lit, l.x, l.y - K.ramp, l.w, l.h + K.ramp * 2, col, alpha * 0.45, 0.09); if (l.h) this.drawRect(lit, l.x, l.y, l.w, l.h, col, alpha, 0.1); }
     }
+    skyRect(lit, r, col, alpha) {
+      if (r.dir === 'x') this.drawRect(lit, r.x - 1, r.y, r.w + 2, 1, col, alpha, 0.1);
+      else this.drawRect(lit, r.x, r.y - 1, 1, r.h + 2, col, alpha, 0.1);
+    }
     outline(lit, x, z, w, d, col, alpha, th) {
       const k = th || 0.05;
       this.drawRect(lit, x, z, w, k, col, alpha, 0.08); this.drawRect(lit, x, z + d - k, w, k, col, alpha, 0.08);
@@ -1230,12 +1388,20 @@
           const b = gh.building;
           if (b) for (const [px, py, pw, ph] of DZ.encParts(b)) { this.drawRect(lit, px, py, pw, ph, [0.86, 0.24, 0.16], 0.35, 0.08); this.outline(lit, px, py, pw, ph, [0.95, 0.35, 0.27], 0.95); }
           else if (gh.link) this.linkRect(lit, gh.link, [0.86, 0.24, 0.16], 0.45);
+          else if (gh.sky) this.skyRect(lit, gh.sky, [0.86, 0.24, 0.16], 0.45);
           else { this.drawRect(lit, gh.x, gh.y, 1, 1, [0.86, 0.24, 0.16], 0.4, 0.08); }
         } else if (gh.kind === 'link' || gh.kind === 'merge') {
           // aperçu d'une passerelle ou d'une réunion d'enclos
           const col = gh.ok ? [0.47, 0.9, 0.55] : [0.9, 0.31, 0.24], lc = gh.ok ? [0.6, 0.95, 0.65] : [0.95, 0.4, 0.3];
           for (const id of [gh.a, gh.b]) { const b = game.buildings[id]; if (b) for (const [px, py, pw, ph] of DZ.encParts(b)) { this.drawRect(lit, px, py, pw, ph, col, 0.16, 0.07); this.outline(lit, px, py, pw, ph, lc, 0.9); } }
           if (gh.kind === 'link' && gh.plan && gh.plan.dir) this.linkRect(lit, gh.plan, col, 0.5);
+        } else if (gh.kind === 'sky') {
+          const col = gh.ok ? [0.47, 0.9, 0.55] : [0.9, 0.31, 0.24];
+          if (gh.plan && gh.plan.tiles && gh.plan.tiles.length) {
+            for (const i of gh.plan.tiles) this.drawRect(lit, (i % W) + 0.08, Math.floor(i / W) + 0.08, 0.84, 0.84, col, 0.45, 0.09);
+            for (const e of gh.plan.ends) this.drawRect(lit, e[0] + 0.2, e[1] + 0.2, 0.6, 0.6, col, 0.3, 0.07);
+          }
+          if (gh.a) { this.drawRect(lit, gh.a[0], gh.a[1], 1, 1, [1, 0.95, 0.8], 0.35, 0.07); this.outline(lit, gh.a[0], gh.a[1], 1, 1, [1, 0.95, 0.8], 0.9, 0.04); }
         }
       }
       gl.uniform1f(lit.u.uTintAmt, 0); gl.uniform1f(lit.u.uAlpha, 1); gl.uniform1f(lit.u.uUnlit, 0);
@@ -1252,7 +1418,7 @@
       if (this.cam.dist < 22) {
         for (const grp of g.visitors) {
           if (grp.hidden || grp.bubbleT <= 0) continue;
-          const p = this.project(grp.x, this.world.heightAt(grp.x, grp.y) + 0.55, grp.y);
+          const p = this.project(grp.x, this.walkY(grp.x, grp.y) + 0.55, grp.y);
           if (!p || p.x < -20 || p.y < -20 || p.x > W2 + 20 || p.y > H2 + 20) continue;
           const sp = R.moodSprite(grp.mood);
           o.globalAlpha = Math.min(1, grp.bubbleT * 2);
@@ -1313,6 +1479,27 @@
           o.fillStyle = 'rgba(230,187,92,0.92)'; this.rrect(o, sp.x - tw / 2, sp.y - 15, tw, 20, 10); o.fill();
           o.fillStyle = '#2a1e10'; o.fillText(label, sp.x, sp.y);
         }
+      }
+      // transferts : étape en cours au-dessus de l'animal
+      if (this.cam.dist < 45) for (const tr of g.transfers) {
+        const txt = g.transferPhaseText(tr);
+        if (!txt || tr.phase === 'done') continue;
+        const p = (this.poses || []).find((q) => q.d === tr.d);
+        const s2 = p ? this.project(p.x, p.y + (p.h || 0.3) + 0.45, p.z) : null;
+        if (!s2) continue;
+        o.font = '600 11px "Trebuchet MS", sans-serif'; o.textAlign = 'center';
+        const tw = o.measureText(txt).width + 16;
+        o.fillStyle = 'rgba(30,60,70,0.82)'; this.rrect(o, s2.x - tw / 2, s2.y - 14, tw, 20, 9); o.fill();
+        o.fillStyle = '#e4fbff'; o.fillText(txt, s2.x, s2.y);
+      }
+      if (this.cam.dist < 26) for (const v of this.vetPos || []) {
+        const s2 = this.project(v.x, v.head + 0.12, v.z);
+        if (!s2) continue;
+        const label = '👩‍⚕️ Vétérinaire';
+        o.font = '600 11px "Trebuchet MS", sans-serif'; o.textAlign = 'center';
+        const tw = o.measureText(label).width + 12;
+        o.fillStyle = 'rgba(238,241,238,0.9)'; this.rrect(o, s2.x - tw / 2, s2.y - 13, tw, 18, 9); o.fill();
+        o.fillStyle = '#245a55'; o.fillText(label, s2.x, s2.y);
       }
       // icônes : malade, non relié
       for (const p of this.poses || []) {
@@ -1397,12 +1584,6 @@
         const dd = Math.hypot(sx - c.x, sy - c.y);
         if (dd < rad && dd < bd) { bd = dd; best = p.d; }
       }
-      return best;
-    }
-    pickDino(wx, wy) {
-      const x = wx / T, z = wy / T;
-      let best = null, bd = 0.8;
-      for (const d of this.game.dinos) { const dd = Math.hypot(d.x - x, d.y - z); if (dd < bd) { bd = dd; best = d; } }
       return best;
     }
 

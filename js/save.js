@@ -15,7 +15,7 @@ window.DZ = window.DZ || {};
     },
     load() { return read(KEY); },
     clear() { try { localStorage.removeItem(KEY); } catch (e) { /* ignoré */ } },
-    settings() { return Object.assign({ muted: false, quality: null, tutorialDone: false, renderer: '3d' }, read(SETTINGS) || {}); },
+    settings() { return Object.assign({ muted: false, quality: null, tutorialDone: false }, read(SETTINGS) || {}); },
     setSettings(s) { write(SETTINGS, s); },
     best() { return read(BEST) || { day: 0, earned: 0 }; }
   };

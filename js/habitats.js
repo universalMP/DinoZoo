@@ -197,7 +197,7 @@ window.DZ = window.DZ || {};
     return o;
   };
   P._maybeCross = function (d, b, sp) {
-    if (sp.habitat !== 'land' || !this.s.links) return false;
+    if (sp.habitat !== 'land' || !this.s.links || d.tr) return false;
     let n = 0;
     for (const id in this.s.links) { const l = this.s.links[id]; if ((l.a === b.id || l.b === b.id) && !l.cons) n++; }
     if (!n) return false;
@@ -293,6 +293,7 @@ window.DZ = window.DZ || {};
       hours: this.worksHours(cost), cap: Math.floor(space * C.enclosureLevels.capacity[level - 1])
     };
     if (this.busy(A) || this.busy(B)) return Object.assign(plan, { ok: false, reason: 'Attendez la fin des travaux en cours' });
+    if (this.transferBusy(A) || this.transferBusy(B)) return Object.assign(plan, { ok: false, reason: 'Un dinosaure est en cours de transfert' });
     if (this.s.money < cost) return Object.assign(plan, { ok: false, reason: 'Fonds insuffisants' });
     return plan;
   };
@@ -339,7 +340,7 @@ window.DZ = window.DZ || {};
     this._rebuildOcc();
     A._accV = -1; A._conV = -1;
     A.upg = { t: 0, dur: p.hours, merge: true, seam: p.seam };
-    for (const g of this.visitors) if (g.target && (g.target.key === B.id || g.target.key === A.id)) { g.hidden = false; g.state = 'idle'; }
+    for (const g of this.visitors) if (g.target && ((g.target.bid || g.target.key) === B.id || (g.target.bid || g.target.key) === A.id)) { g.hidden = false; g.state = 'idle'; }
     this._netChanged({ x0: A.x - 2, y0: A.y - 2, x1: A.x + A.w + 2, y1: A.y + A.h + 2 });
     this._updateHappiness();
     this.emit('merged', { b: A, removed: B });
@@ -399,7 +400,7 @@ window.DZ = window.DZ || {};
       const riv = this.rivalsIn(b);
       for (const sp in riv) {
         if (b.calm && b.calm[sp] > now) continue;
-        const males = riv[sp].filter((d) => !d.fight && !d.hunt && !d.cross && !d.sick && d.state !== 'rest');
+        const males = riv[sp].filter((d) => !d.fight && !d.hunt && !d.cross && !d.tr && !d.sick && d.state !== 'rest');
         if (males.length < 2) continue;
         const terr = DZ.SPECIES[sp].terr;
         const crowd = U.clamp(this.usedSpace(b) / Math.max(1, this.capacity(b)) - 0.6, 0, 0.5) * 2;
@@ -598,7 +599,7 @@ window.DZ = window.DZ || {};
       if (this.hunts.some((h) => h.enc === b.id)) continue; // une chasse à la fois par enclos
       const dinos = this.dinosIn(b);
       if (!dinos.some((d) => DZ.SPECIES[d.sp].predator)) continue;
-      const free = (d) => !d.fight && !d.hunt && !d.cross;
+      const free = (d) => !d.fight && !d.hunt && !d.cross && !d.tr;
       for (const pred of dinos) {
         const sp = DZ.SPECIES[pred.sp];
         if (!sp.predator || pred.young || pred.sick || !free(pred) || pred.sated > now) continue;
