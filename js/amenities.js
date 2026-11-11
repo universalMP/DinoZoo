@@ -331,6 +331,7 @@ window.DZ = window.DZ || {};
     for (const f of this.fights.slice()) if (f.a === d || f.b === d) this._endFight(f);
     for (const h of this.hunts.slice()) if (h.pred === d || h.prey === d) this._endHunt(h);
     if (d.cross) this._abortCross(d);
+    if (d.ram) this._endRam(d);
     const from = this.s.buildings[d.enc];
     const west = this.layout && this.layout.seaSide === 'W';
     // point de dépose : à découvert (pas sous une passerelle d'observation)
@@ -460,7 +461,7 @@ window.DZ = window.DZ || {};
         case 'enter':
           if (tr.clear) {
             // il avance jusqu'à l'endroit dégagé
-            const dx = tr.clear.x - d.x, dy = tr.clear.y - d.y, dist = Math.hypot(dx, dy), spd = sp.speed * 0.8;
+            const dx = tr.clear.x - d.x, dy = tr.clear.y - d.y, dist = Math.hypot(dx, dy), spd = sp.speed * 1.3;
             if (dist < 0.06) { tr.clear = null; d.moving = 0; }
             else { const st = Math.min(dist, spd * dt); d.x += dx / dist * st; d.y += dy / dist * st; d.gx = tr.clear.x; d.gy = tr.clear.y; d.look = null; d.state = 'walk'; d.moving = spd; d.face = dx > 0 ? 1 : -1; d.phase += st * 6.5 / Math.max(0.5, Math.sqrt(C.dinos[d.sp].space)); }
             break;
@@ -531,6 +532,7 @@ window.DZ = window.DZ || {};
     const from = this.s.buildings[tr.from];
     const wasLoose = !!d.loose;
     d.loose = null; d.run = 0;
+    d.sedated = this.s.day * 24 + this.s.hour + C.fence.sedated; // encore groggy : il se tient tranquille
     d.enc = b.id; d.x = tr.tx; d.y = tr.ty; d.gx = d.x; d.gy = d.y;
     this.keepInside(d, b, DZ.SPECIES[d.sp]);
     if (b.breed) delete b.breed[d.sp];

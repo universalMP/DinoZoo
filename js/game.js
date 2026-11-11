@@ -383,7 +383,7 @@ window.DZ = window.DZ || {};
       const buildings = {};
       for (const id in s.buildings) {
         const b = s.buildings[id];
-        buildings[id] = { id: b.id, type: b.type, x: b.x, y: b.y, w: b.w, h: b.h, level: b.level, invested: b.invested, seed: b.seed, fixed: b.fixed, built: b.built, earned: Math.round(b.earned || 0), cons: b.cons, upg: b.upg, breed: b.breed, parts: b.parts, space: b.space, size: b.size, calm: b.calm };
+        buildings[id] = { id: b.id, type: b.type, x: b.x, y: b.y, w: b.w, h: b.h, level: b.level, invested: b.invested, seed: b.seed, fixed: b.fixed, built: b.built, earned: Math.round(b.earned || 0), cons: b.cons, upg: b.upg, breed: b.breed, parts: b.parts, space: b.space, size: b.size, calm: b.calm, fence: b.fence == null ? undefined : Math.round(b.fence * 10) / 10, dmg: b.dmg && b.dmg.length ? b.dmg : undefined, autoFix: b.autoFix || undefined };
       }
       const cl = [];
       for (let i = 0; i < W * H; i++) if (this.cleared[i] && this.treeAt[i]) cl.push(i.toString(36));
@@ -567,6 +567,10 @@ window.DZ = window.DZ || {};
           if (def.cat !== 'deco') this.notify('✅', `Construction terminée : ${DZ.bName(b)}.`, 'good', { type: 'select', building: b.id });
           this.emit('constructed', b);
           this.emit('mapChanged', region);
+        } else if (b.upg.repair) {
+          delete b.upg;
+          this._finishRepair(b);
+          this.emit('mapChanged', region);
         } else if (b.upg.merge) {
           delete b.upg;
           this._updateHappiness();
@@ -576,6 +580,7 @@ window.DZ = window.DZ || {};
         } else {
           delete b.upg;
           b.level++;
+          if (this.hasFence(b)) { b.fence = 100; b.dmg = []; } // clôture neuve
           this._updateHappiness();
           this.notify('✨', `Travaux terminés : ${DZ.bName(b)} au niveau ${b.level} !`, 'good', { type: 'select', building: b.id });
           this.emit('upgraded', b);
@@ -1169,6 +1174,7 @@ window.DZ = window.DZ || {};
     updateDinos(dt) {
       if (this.fights.length) this._updateFights(dt);
       if (this.hunts.length) this._updateHunts(dt);
+      this._updateRams(dt);
       for (const d of this.s.dinos) {
         const b = this.s.buildings[d.enc];
         if (!b) continue;
@@ -1176,7 +1182,7 @@ window.DZ = window.DZ || {};
         d.t += dt;
         if (d.tr && d.tr.hold) continue; // transfert : animé à part
         if (d.loose) { this._updateLoose(d, sp, dt); continue; } // évadé, en liberté dans le parc
-        if (d.fight || d.hunt) continue; // combats, chasses et transferts sont animés à part
+        if (d.fight || d.hunt || d.ram) continue; // combats, chasses et transferts sont animés à part
         if (d.cross) { this._updateCrossing(d, b, sp, dt); continue; }
         if (sp.habitat === 'air') this._updateFlyer(d, b, sp, dt);
         else if (sp.habitat === 'water') this._updateSwimmer(d, b, sp, dt);
@@ -1381,6 +1387,7 @@ window.DZ = window.DZ || {};
       this._updateLinkWorks(dh);
       if (this.transfers.length) this._updateTransfers(dt);
       this._checkFights(dh);
+      this._checkRams(dh);
       this._checkHunts(dh);
       if (s.births.length) this._checkBirths(prevHour);
       this._updatePlayer(dt);
@@ -1461,6 +1468,8 @@ window.DZ = window.DZ || {};
         const b = s.buildings[id], def = C.buildings[b.type];
         if (def.upkeep) bUp += this.upkeepOf(b);
       }
+      // usure des clôtures ; l'entretien automatique est débité ici
+      bUp += this._fenceNight();
       s.money -= dinoUp + bUp;
       t.upkeepDinos = dinoUp; t.upkeepBuildings = bUp;
       this.emit('money', -(dinoUp + bUp));

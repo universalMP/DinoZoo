@@ -33,8 +33,9 @@ window.DZ = window.DZ || {};
   P.escapeRisk = function (d, b) {
     const E = C.escape, sp = DZ.SPECIES[d.sp];
     if (!b || !this.isEnclosure(b) || C.buildings[b.type].kind !== 'land' || sp.habitat !== 'land') return 0;
-    if (d.young || d.loose || d.tr || b.cons) return 0;
-    return E.fence[b.level - 1] * E.base[sp.size || 'M'] * (sp.predator ? E.predator : 1) * (d.happiness < 40 ? E.unhappy : 1);
+    if (d.young || d.loose || d.tr || b.cons || d.sedated > this.s.day * 24 + this.s.hour) return 0;
+    // la clôture : son niveau et son état (voir fences.js)
+    return this.fenceRisk(b) * E.base[sp.size || 'M'] * (sp.predator ? E.predator : 1) * (d.happiness < 40 ? E.unhappy : 1);
   };
   /* Chaque matin : au plus une évasion dans la journée. */
   P._scheduleEscape = function () {
@@ -44,7 +45,11 @@ window.DZ = window.DZ || {};
     const list = [];
     let total = 0;
     for (const d of s.dinos) { const r = this.escapeRisk(d, s.buildings[d.enc]); if (r > 0) { list.push([d, r]); total += r; } }
-    if (!list.length || R() >= Math.min(0.9, total)) return;
+    if (!list.length) return;
+    // une clôture à bout cède à coup sûr
+    const broken = list.filter(([d]) => this.fenceOf(s.buildings[d.enc]) < C.fence.breach).sort((a, b) => b[1] - a[1])[0];
+    if (broken) { s.escapeAt = rr(9.5, 16.5); s.escapeDino = broken[0].id; return; }
+    if (R() >= Math.min(0.9, total)) return;
     let k = R() * total, pick = list[0][0];
     for (const [d, r] of list) { k -= r; if (k <= 0) { pick = d; break; } }
     s.escapeAt = rr(9.5, 16.5); s.escapeDino = pick.id;
@@ -81,15 +86,15 @@ window.DZ = window.DZ || {};
     s.escapeAt = null;
     const d = s.dinos.find((x) => x.id === s.escapeDino);
     const b = d && s.buildings[d.enc];
+    if (d && d.ram) this._endRam(d);
     if (!d || d.fight || d.hunt || d.cross || !this.escapeRisk(d, b)) return;
     const out = breachPoint(this, d);
     if (!out) return;
     const sp = DZ.SPECIES[d.sp], size = sp.size || 'M', danger = this.dangerOf(d);
     d.loose = { phase: 'out', t: 0, ox: out.x, oy: out.y, gx: null, gy: null, panicT: 0, wait: 0, calm: E.hesitate };
     d.state = 'walk'; d.anim = 0; d.timer = 0;
-    // conséquences : réparation, note, peur durable
-    const cost = E.repair[size];
-    this._spend(cost, 'eventsCost');
+    // conséquences : clôture défoncée (à réparer), note, peur durable
+    this._damageFence(b, Math.max(0, this.fenceOf(b) - E.breachDamage), out.x, out.y, 1);
     const stars = E.rating * danger;
     s.rating = U.clamp(s.rating - stars, 0, 5);
     s.fear = Math.min(0.8, (s.fear || 0) + E.fear * danger);
@@ -98,7 +103,7 @@ window.DZ = window.DZ || {};
     this.emit('escape', { dino: d, building: b, x: out.x, y: out.y, danger });
     const closed = danger >= E.close;
     const what = sp.predator ? (closed ? 'Les visiteurs fuient en hurlant, le parc ferme ses portes.' : 'Les visiteurs proches s\'enfuient.') : (danger >= 0.3 ? 'Les visiteurs proches s\'écartent, inquiets.' : 'Quelques visiteurs s\'inquiètent.');
-    this.notify('🚨', `Évasion ! ${this.who(d)} a enfoncé la clôture et se promène dans le parc. ${what}${sp.predator ? ' S\'il attaque un visiteur, la partie est perdue !' : ''} Sélectionnez-${d.sex === 'F' ? 'la' : 'le'} et envoyez la vétérinaire. Réparation : ${U.money(cost)}, note −${stars.toFixed(2)} ★.`, 'bad', { type: 'dino', dino: d.id });
+    this.notify('🚨', `Évasion ! ${this.who(d)} a enfoncé la clôture et se promène dans le parc. ${what}${sp.predator ? ' S\'il attaque un visiteur, la partie est perdue !' : ''} Sélectionnez-${d.sex === 'F' ? 'la' : 'le'} et envoyez la vétérinaire, puis réparez la clôture. Note −${stars.toFixed(2)} ★.`, 'bad', { type: 'dino', dino: d.id });
   };
 
   /* Les visiteurs proches paniquent et fuient (les portes du parc ferment s'il est dangereux).

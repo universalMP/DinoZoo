@@ -249,7 +249,7 @@ DZ.CONFIG = {
     predator: 5,                        // × pour les carnivores (grand carnivore derrière une palissade : 15 % par jour)
     unhappy: 1.8,                       // × si l'animal est malheureux (bonheur < 40)
     danger: { herb: { S: 0.08, M: 0.2, L: 0.35 }, pred: { S: 0.55, M: 0.75, L: 1 } }, // 0 inoffensif → 1 terrifiant
-    repair: { S: 600, M: 1500, L: 2500 }, // réparation de la clôture
+    breachDamage: 20,                   // état de la clôture après une évasion (elle reste à réparer)
     rating: 0.7,                        // étoiles perdues (× danger)
     fear: 0.55,                         // fréquentation perdue les jours suivants (× danger)
     fearDecay: 0.6,                     // part de la peur qui reste chaque lendemain
@@ -262,6 +262,25 @@ DZ.CONFIG = {
     hesitate: 5,                        // secondes de jeu : un carnivore évadé rugit et flaire avant de chasser
     run: { S: 2.4, M: 2.8, L: 3.4 },    // il charge à cette vitesse (× la sienne, selon sa taille)
     reach: 0.45                         // distance d'attaque, en plus de sa demi-longueur
+  },
+
+  /* ---------- État des clôtures (enclos terrestres) ---------- */
+  fence: {
+    wear: [1.5, 0.8, 0.25],             // % d'état perdus chaque jour (palissade, électrifiée, murs de verre)
+    hitRate: 0.12,                      // charges contre la clôture par heure de jeu, grand carnivore (× taille, × humeur)
+    hitSize: { S: 0.25, M: 0.55, L: 1 },
+    hitHerb: 0.35,                      // × pour un herbivore
+    hitUnhappy: 2,                      // × s'il est malheureux (bonheur < 40)
+    hit: { S: 1, M: 2, L: 3 },          // % perdus par charge (× selon le niveau ci-dessous)
+    hitLevel: [1, 0.6, 0.15],
+    sedated: 8,                         // heures de calme après une anesthésie (ni charge ni évasion)
+    risk: 2,                            // risque d'évasion × (1 + 2 × usure^1,3) : × 3 à 40 % d'état
+    breach: 15,                         // sous ce seuil, l'animal perce la clôture dans la journée
+    glass: 30,                          // les murs de verre ne cèdent pas au-dessus de ce seuil
+    repair: 0.2,                        // réparation complète = 20 % du prix de l'enclos (× 1 / 1,4 / 2 selon le niveau)
+    repairLevel: [1, 1.4, 2],
+    auto: 75,                           // entretien automatique : réparée chaque nuit sous ce seuil…
+    autoExtra: 0.2                      // … pour 20 % de plus
   },
 
   /* ---------- Combats entre mâles adultes ---------- */

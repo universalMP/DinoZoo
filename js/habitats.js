@@ -336,6 +336,10 @@ window.DZ = window.DZ || {};
     for (const br of s.births) if (br.enc === B.id) br.enc = A.id;
     for (const f of this.fights) if (f.enc === B.id) f.enc = A.id;
     for (const h of this.hunts) if (h.enc === B.id) h.enc = A.id;
+    // la clôture garde l'état de la plus abîmée des deux
+    if (A.fence != null || B.fence != null) A.fence = Math.min(this.fenceOf(A), this.fenceOf(B));
+    if (B.dmg) A.dmg = (A.dmg || []).concat(B.dmg).slice(-8);
+    if (B.autoFix) A.autoFix = 1;
     delete s.buildings[B.id];
     this._rebuildOcc();
     A._accV = -1; A._conV = -1;
@@ -400,7 +404,7 @@ window.DZ = window.DZ || {};
       const riv = this.rivalsIn(b);
       for (const sp in riv) {
         if (b.calm && b.calm[sp] > now) continue;
-        const males = riv[sp].filter((d) => !d.fight && !d.hunt && !d.cross && !d.tr && !d.loose && !d.sick && d.state !== 'rest');
+        const males = riv[sp].filter((d) => !d.fight && !d.hunt && !d.cross && !d.tr && !d.loose && !d.ram && !d.sick && d.state !== 'rest');
         if (males.length < 2) continue;
         const terr = DZ.SPECIES[sp].terr;
         const crowd = U.clamp(this.usedSpace(b) / Math.max(1, this.capacity(b)) - 0.6, 0, 0.5) * 2;
@@ -599,7 +603,7 @@ window.DZ = window.DZ || {};
       if (this.hunts.some((h) => h.enc === b.id)) continue; // une chasse à la fois par enclos
       const dinos = this.dinosIn(b);
       if (!dinos.some((d) => DZ.SPECIES[d.sp].predator)) continue;
-      const free = (d) => !d.fight && !d.hunt && !d.cross && !d.tr && !d.loose;
+      const free = (d) => !d.fight && !d.hunt && !d.cross && !d.tr && !d.loose && !d.ram;
       for (const pred of dinos) {
         const sp = DZ.SPECIES[pred.sp];
         if (!sp.predator || pred.young || pred.sick || !free(pred) || pred.sated > now) continue;

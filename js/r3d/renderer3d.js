@@ -107,7 +107,8 @@
 
       game.on('mapChanged', (r) => { this.world.markDirty(r); this._dirtyWorld = true; });
       game.on('reset', () => { this.world.markDirty(null); this._dirtyWorld = true; this._dirtyStatic = true; this.dinoState.clear(); this.world.noise = null; this.world.ridge = null; if (this.far) { G.free(this.gl, this.far.water); G.free(this.gl, this.far.land); this.far = null; } });
-      for (const ev of ['built', 'upgraded', 'moved', 'merged', 'linkBuilt', 'linkDone', 'linkRemoved', 'skyBuilt', 'skyRemoved']) game.on(ev, () => { this._dirtyStatic = true; });
+      for (const ev of ['built', 'upgraded', 'moved', 'merged', 'linkBuilt', 'linkDone', 'linkRemoved', 'skyBuilt', 'skyRemoved', 'fenceChanged']) game.on(ev, () => { this._dirtyStatic = true; });
+      game.on('fenceHit', (e) => { this.burst3(e.x, e.y, 0.35, 'dust'); if (Math.hypot(e.x - this.cam.tx, e.y - this.cam.tz) < this.cam.dist) this.shake = Math.max(this.shake, C.dinos[e.sp].space >= 6 ? 0.35 : 0.15); });
       game.on('dart', (tr) => { const v = tr.vet; if (v) this.addP({ k: 'spark', x: (v.x + tr.d.x) / 2, y: this.world.heightAt(tr.d.x, tr.d.y) + 0.4, z: (v.y + tr.d.y) / 2, vx: 0, vy: 0.3, vz: 0, life: 0, max: 0.5, s: 0.07 }); });
       game.on('transferred', (tr) => this.burst3(tr.d.x, tr.d.y, 0.6, 'dust'));
       game.on('kill', (e) => { this.burst3(e.prey.x, e.prey.y, 0.6, 'dust'); });
@@ -1039,7 +1040,10 @@
           const m = M4.create(); M4.translate(m, 0, e.h, 0); M4.scale(m, 1, k, 1); M4.translate(m, 0, -e.h, 0);
           parts.push([e.mesh, m]);
         }
-        if (b.upg && b.upg.merge) {
+        if (b.upg && b.upg.repair) {
+          // réparation de la clôture : simple étiquette
+          this.works.push({ b, x: b.x + b.w / 2, y: e.h + 1.2, z: b.y + b.h / 2, p, label: '🔧 Réparation' });
+        } else if (b.upg && b.upg.merge) {
           // démontage de la clôture commune : poussière le long de la couture
           const sm = b.upg.seam;
           this.works.push({ b, x: sm.x, y: e.h + 1.1, z: sm.y, p, label: '🔗 Réunion' });

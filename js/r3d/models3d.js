@@ -598,28 +598,37 @@
     const sh0 = DZ.encShape(b), sh = sh0.main || sh0;
     const gates = world && world.game && world.game.gatesOf && b.id > 0 ? world.game.gatesOf(b) : [];
     const front = [];
+    // clôture abîmée : traces des charges et de l'évasion (b.dmg), poteaux de travers quand elle est usée
+    const wear = b.id > 0 && b.fence != null ? U.clamp((100 - b.fence) / 100, 0, 1) : 0;
+    const dmgAt = (lx, lz) => { let k = 0; for (const p of b.dmg || []) k = Math.max(k, p[2] * U.clamp(1 - Math.hypot(p[0] - b.x - lx, p[1] - b.y - lz) / 1.3, 0, 1)); return k; };
     for (const pts of loops) alongLoop(pts, (x, z, ang, len, i, nrm, q) => {
       if (inGate(b, gates, [x, z], q)) return;
+      const dk = dmgAt((x + q[0]) / 2, (z + q[1]) / 2);
+      const lean = (dk > 0.15 ? dk * 0.55 : 0) + (U.hash(i, 7, b.seed) < wear * 0.7 ? 0.06 + U.hash(i, 9, b.seed) * 0.16 : 0);
+      const tilt = lean * (U.hash(i, 11, b.seed) < 0.5 ? -1 : 1);
+      const broken = dk > 0.45, cracked = dk > 0.2;
       mb.push().t(x, 0, z).ry(-ang);
       if (lv === 1) {
-        mb.material('wood').col(i % 2 ? '#8a6240' : '#7a5636').push().rz((U.hash(i, 3, b.seed) - 0.5) * 0.08).cyl(0.03, 0.026, 0.32 + U.hash(i, 1, b.seed) * 0.05, 6).pop();
+        mb.material('wood').col(i % 2 ? '#8a6240' : '#7a5636').push().rz((U.hash(i, 3, b.seed) - 0.5) * 0.08).rx(tilt).cyl(0.03, 0.026, 0.32 + U.hash(i, 1, b.seed) * 0.05, 6).pop();
         mb.col('#6e4c30');
-        for (const y of [0.12, 0.27]) mb.push().t(len / 2, y + (U.hash(i, y * 10, b.seed) - 0.5) * 0.02, 0).box(len + 0.02, 0.032, 0.028).pop();
+        for (const y of [0.12, 0.27]) if (!broken && !(cracked && y > 0.2)) mb.push().t(len / 2, y + (U.hash(i, y * 10, b.seed) - 0.5) * 0.02, 0).box(len + 0.02, 0.032, 0.028).pop();
+        if (broken) mb.push().t(len * 0.4, 0.03, 0.1).ry(0.6).rz(0.1).box(len * 0.8, 0.03, 0.028).pop(); // lisse tombée
       } else if (lv === 2) {
         mb.material('stone').col('#9a968c').push().t(len / 2, 0, 0).box(len + 0.04, 0.05, 0.1).pop();
-        mb.material('metal').col('#6e767c').push().box(0.05, 0.66, 0.05).pop();
-        mb.col('#2f3438').push().t(0, 0.66, 0).box(0.09, 0.03, 0.09).pop();
-        if (i % 3 === 1) mb.material('emissive').col('#ffe2a0').push().t(0, 0.7, 0).sphere(0.025, 0.025, 0.025, 5, 3).pop();
-        if (i % 4 === 2) { mb.push().t(len / 2, 0.3, 0.035); sign(mb, 0.16, 0.08, '⚡ DANGER', 0.01); mb.pop(); }
+        mb.material('metal').col('#6e767c').push().rx(tilt).box(0.05, 0.66, 0.05).pop();
+        mb.col('#2f3438').push().rx(tilt).t(0, 0.66, 0).box(0.09, 0.03, 0.09).pop();
+        if (i % 3 === 1 && !broken) mb.material('emissive').col('#ffe2a0').push().t(0, 0.7, 0).sphere(0.025, 0.025, 0.025, 5, 3).pop();
+        if (i % 4 === 2 && !broken) { mb.push().t(len / 2, 0.3, 0.035); sign(mb, 0.16, 0.08, '⚡ DANGER', 0.01); mb.pop(); }
         mb.material('metal').col('#30363a');
-        for (let k = 0; k < 5; k++) mb.push().t(len / 2, 0.1 + k * 0.12, 0).box(len + 0.02, 0.008, 0.008).pop();
-        if (i % 3 === 1) out.lights.push([b.x + x, 0.75, b.y + z, 1.5]);
+        for (let k = 0; k < 5; k++) if (!broken && !(cracked && k > 1)) mb.push().t(len / 2, 0.1 + k * 0.12, 0).box(len + 0.02, 0.008, 0.008).pop();
+        if (i % 3 === 1 && !broken) out.lights.push([b.x + x, 0.75, b.y + z, 1.5]);
       } else {
         mb.material('stone').col('#a8a49a').push().t(len / 2, 0, 0).box(len + 0.03, 0.13, 0.12).pop();
         mb.col('#c6c2b8').push().t(len / 2, 0.13, 0).box(len + 0.03, 0.015, 0.14).pop();
-        mb.material('metal').col('#3f454a').push().t(0, 0.13, 0).box(0.04, 0.5, 0.04).pop();
-        mb.push().t(len / 2, 0.62, 0).box(len + 0.02, 0.025, 0.05).pop();
-        glass.push(); glass.m = G.m4.copy(mb.m); glass.material('glass').col('#bfe0ea').face([0, 0.14, 0], [len, 0.14, 0], [len, 0.62, 0], [0, 0.62, 0]); glass.pop();
+        mb.material('metal').col('#3f454a').push().t(0, 0.13, 0).rx(tilt * 0.5).box(0.04, 0.5, 0.04).pop();
+        if (!broken) mb.push().t(len / 2, 0.62, 0).box(len + 0.02, 0.025, 0.05).pop();
+        if (!broken) { glass.push(); glass.m = G.m4.copy(mb.m); glass.material('glass').col(cracked ? '#d8e4e6' : '#bfe0ea').face([0, 0.14, 0], [len, 0.14, 0], [len, 0.62, 0], [0, 0.62, 0]); glass.pop(); }
+        if (cracked && !broken) { mb.material('metal').col('#e8f0f2'); mb.push().t(len * 0.5, 0.38, 0.01).rz(0.7).box(len * 0.6, 0.006, 0.004).pop(); mb.push().t(len * 0.45, 0.4, 0.01).rz(-0.5).box(len * 0.45, 0.006, 0.004).pop(); }
         if (nrm[1] > 0.55) front.push([x, z, ang, len, nrm]);
       }
       mb.pop();

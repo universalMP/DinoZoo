@@ -914,10 +914,10 @@ window.DZ = window.DZ || {};
     buildingHover(b) {
       const g = this.game, def = C.buildings[b.type];
       let grid = '';
-      if (def.cat === 'enclos') grid = `<span>Dinosaures</span><span>${g.dinosIn(b).length}</span><span>Place</span><span>${g.usedSpace(b)} / ${g.capacity(b)}</span><span>Attractivité</span><span>${Math.round(g.enclosureAttraction(b))}</span>`;
+      if (def.cat === 'enclos') grid = `<span>Dinosaures</span><span>${g.dinosIn(b).length}</span><span>Place</span><span>${g.usedSpace(b)} / ${g.capacity(b)}</span><span>Attractivité</span><span>${Math.round(g.enclosureAttraction(b))}</span>${g.hasFence(b) ? `<span>Clôture</span><span>${g.fenceOf(b) < 40 ? '⚠️ ' : ''}${Math.round(g.fenceOf(b))} %</span>` : ''}`;
       else if (def.cat === 'service') grid = `<span>Revenus</span><span>${money(b.earned || 0)}</span><span>Entretien / jour</span><span>${money(g.upkeepOf(b))}</span>`;
       else if (b.type === 'entree') grid = `<span>Billet</span><span>${money(g.ticketPrice())}</span><span>Visiteurs du jour</span><span>${U.fmt(g.s.today.visitors)}</span>`;
-      const lvl = (def.upgrade ? ` · Niveau ${b.level}` : '') + (b.cons ? ` · 🚧 chantier ${Math.round(g.worksProgress(b) * 100)} %` : b.upg ? ` · ${b.upg.merge ? '🔗 réunion' : '⬆ travaux'} ${Math.round(g.worksProgress(b) * 100)} %` : '');
+      const lvl = (def.upgrade ? ` · Niveau ${b.level}` : '') + (b.cons ? ` · 🚧 chantier ${Math.round(g.worksProgress(b) * 100)} %` : b.upg ? ` · ${b.upg.repair ? '🔧 réparation' : b.upg.merge ? '🔗 réunion' : '⬆ travaux'} ${Math.round(g.worksProgress(b) * 100)} %` : '');
       const warn = def.cat !== 'deco' && b.type !== 'entree' && !b.cons && !g.isConnected(b) ? '<div class="t-sub" style="color:#f3c3b5">⚠️ Non relié à l\'entrée par un chemin</div>' : '';
       return `<b>${esc(DZ.bName(b))}</b><span class="t-sub">${lvl}</span>${warn}<div class="t-grid">${grid}</div>`;
     }
@@ -997,7 +997,8 @@ window.DZ = window.DZ || {};
         const rv = g.rivalryInfo(b).map((r) => r.sp + r.n + r.calm).join(',');
         const kd = C.buildings[b.type].play ? g.kidsAt(b).length : '';
         const tf = (g.transfers || []).filter((tr) => tr.to === b.id || tr.from === b.id).map((tr) => tr.id + tr.phase).join(',');
-        return [b.id, b.level, ds, dl, kd, tf, moneyBand, g.isConnected(b), Math.round(b.earned || 0), b.x, b.y, b.w, b.h, Math.round(g.worksProgress(b) * 50), !!b.upg, JSON.stringify(b.breed || {}), ls, rv, Object.keys(g.buildings).length].join('|');
+        const fz = g.hasFence(b) ? Math.round(g.fenceOf(b)) + ':' + !!b.autoFix + ':' + g.dinosIn(b).some((d) => d.ram) : '';
+        return [b.id, b.level, ds, dl, kd, tf, fz, moneyBand, g.isConnected(b), Math.round(b.earned || 0), b.x, b.y, b.w, b.h, Math.round(g.worksProgress(b) * 50), !!b.upg, JSON.stringify(b.breed || {}), ls, rv, Object.keys(g.buildings).length].join('|');
       }
       if (sel.kind === 'link') {
         const l = g.s.links[sel.id];
@@ -1015,7 +1016,7 @@ window.DZ = window.DZ || {};
       const connected = g.isConnected(b);
       if (b.cons || b.upg) {
         const p = g.worksProgress(b);
-        const what = b.cons ? `🚧 Chantier en cours · ${Math.round(p * 100)} %` : b.upg.merge ? `🔗 Réunion des enclos · ${Math.round(p * 100)} %` : `⬆ Travaux vers le niveau ${b.level + 1} · ${Math.round(p * 100)} %`;
+        const what = b.cons ? `🚧 Chantier en cours · ${Math.round(p * 100)} %` : b.upg.repair ? `🔧 Réparation de la clôture · ${Math.round(p * 100)} %` : b.upg.merge ? `🔗 Réunion des enclos · ${Math.round(p * 100)} %` : `⬆ Travaux vers le niveau ${b.level + 1} · ${Math.round(p * 100)} %`;
         const after = b.cons ? (def.cat === 'enclos' ? 'Vous pourrez y installer des dinosaures à la fin des travaux.' : def.cat === 'service' ? 'Les visiteurs pourront en profiter à la fin des travaux.' : '') : 'Le bâtiment reste ouvert pendant les travaux.';
         h += `<div class="works"><div class="works-h">${what}</div><div class="meter"><i class="works-bar" style="width:${Math.round(p * 100)}%"></i></div><div class="works-s">Fin dans ≈ ${fmtH(g.worksLeft(b))}. ${after}</div></div>`;
       }
@@ -1037,13 +1038,15 @@ window.DZ = window.DZ || {};
           else h += `<div class="info">🛡️ ${esc(capFirst(DZ.leSp(pi.pred)))} attaque parfois ${esc(DZ.leSp(pi.prey))}, trop grand pour lui : la proie se défend et peut le blesser.</div>`;
         }
         if (pinfo.length) h += `<div class="info small">Séparez-les : transférez l'un d'eux dans un autre enclos (sélectionnez l'animal, puis 🚁 Transférer). Une passerelle permet aux proies de fuir.</div>`;
+        if (g.hasFence(b) && !b.cons) h += this.fenceSection(b, dinos);
         {
           // risque d'évasion (au plus un par jour dans le parc)
           let risk = 0, pred = false;
           for (const d of dinos) { const r = g.escapeRisk(d, b); risk += r; if (r && DZ.SPECIES[d.sp].predator) pred = true; }
           if (risk >= 0.004) {
             const pc = Math.max(1, Math.round(Math.min(0.9, risk) * 100));
-            h += `<div class="${pred || risk > 0.05 ? 'warn' : 'info'}">${pred ? '⚠️' : '🚧'} Risque d'évasion ≈ ${pc} % par jour.${pred ? ' Un carnivore en liberté peut attaquer un visiteur : la partie serait perdue.' : ''} ${b.level < 3 ? (b.level === 1 ? 'Une clôture électrifiée le divise par cinq ; les murs de verre l\'empêchent.' : 'Les murs de verre (niveau 3) l\'empêchent.') : ''}</div>`;
+            const broken = g.fenceOf(b) < C.fence.breach;
+            h += `<div class="${pred || risk > 0.05 || broken ? 'warn' : 'info'}">${pred ? '⚠️' : '🚧'} Risque d'évasion ≈ ${broken ? 'certain aujourd\'hui (clôture percée)' : pc + ' % par jour'}.${pred ? ' Un carnivore en liberté peut attaquer un visiteur : la partie serait perdue.' : ''} ${b.level < 3 ? (b.level === 1 ? 'Une clôture électrifiée le divise par cinq ; les murs de verre, bien entretenus, l\'empêchent.' : 'Les murs de verre (niveau 3), bien entretenus, l\'empêchent.') : ''}</div>`;
           }
         }
         for (const rv of g.rivalryInfo(b)) {
@@ -1107,6 +1110,20 @@ window.DZ = window.DZ || {};
         h += `<div class="btns"><button class="btn" data-act="move" ${g.busy(b) || b.parts || g.linksOf(b).length ? 'disabled' : ''} title="${b.parts ? 'Un enclos agrandi ne se déplace pas' : g.linksOf(b).length ? 'Démolissez d\'abord ses passerelles' : ''}">✋ Déplacer</button><button class="btn danger" data-act="demolish">🧨 Démolir (+${money(refund)})</button></div>`;
       }
       return h;
+    }
+
+    /* État de la clôture : jauge, réparation, entretien automatique. */
+    fenceSection(b, dinos) {
+      const g = this.game, F = C.fence, c = Math.round(g.fenceOf(b)), cost = g.repairCost(b);
+      const cls = c < 40 ? 'low' : c < 70 ? 'mid' : '';
+      const rams = dinos.some((d) => d.ram);
+      let h = `<div class="section"><h3>Clôture</h3><div class="rows"><span class="k">État</span><span class="v">${c} %${rams ? ' · 💥 un animal la charge !' : ''}</span></div><div class="meter"><i class="${cls}" style="width:${c}%"></i></div>`;
+      if (c < F.breach) h += `<div class="warn">🚨 Clôture percée : un animal va s'échapper. Réparez-la tout de suite.</div>`;
+      else if (c < 40) h += `<div class="warn">⚠️ Clôture très abîmée : le risque d'évasion est multiplié par ${(g.fenceRisk(b) / Math.max(1e-6, b.level >= 3 ? C.escape.fence[1] : C.escape.fence[b.level - 1])).toFixed(1).replace('.', ',')}.</div>`;
+      else h += `<div class="info small">Elle s'use avec le temps et sous les charges des gros animaux, surtout des carnivores malheureux. Plus elle est abîmée, plus une évasion est probable.</div>`;
+      h += `<button class="btn wide opt" data-act="repair" ${c >= 100 || g.busy(b) || g.s.money < cost ? 'disabled' : ''}><span>🔧 Réparer la clôture</span><span class="cost">${c >= 100 ? '✓' : money(cost)}</span></button>`;
+      h += `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;font-size:12.5px;color:var(--muted);cursor:pointer"><input type="checkbox" data-act="autofix" ${b.autoFix ? 'checked' : ''}> <span>Entretien automatique : réparée chaque nuit sous ${F.auto} % (+${Math.round(F.autoExtra * 100)} %)</span></label>`;
+      return h + '</div>';
     }
 
     /* Passerelles et réunion d'enclos (panneau d'un enclos terrestre). */
@@ -1228,7 +1245,9 @@ window.DZ = window.DZ || {};
       if (act === 'unsky' && sel.kind === 'sky') { const r = g.skyRunAt(sel.x, sel.y); if (r) this.demolishSky(r); return; }
       if (sel.kind === 'building') {
         const b = g.buildings[sel.id];
-        if (act === 'upgrade') { const r = g.upgrade(b.id); if (r.ok) { this.sound.play('build'); this.toast('🚧', `Travaux d'amélioration lancés : ${C.buildings[b.type].name}, niveau ${b.level + 1} dans ≈ ${fmtH(r.hours)}.`, 'info'); } else this.error(r.reason); }
+        if (act === 'repair') { const r = g.repairFence(b.id); if (r.ok) { this.sound.play('build'); this.toast('🔧', `Réparation de la clôture lancée : ${money(r.cost)}, prête dans ≈ ${fmtH(r.hours)}.`, 'info'); } else this.error(r.reason); }
+        else if (act === 'autofix') { g.setAutoFence(b.id, t.checked); this.sound.play('click'); return; }
+        else if (act === 'upgrade') { const r = g.upgrade(b.id); if (r.ok) { this.sound.play('build'); this.toast('🚧', `Travaux d'amélioration lancés : ${C.buildings[b.type].name}, niveau ${b.level + 1} dans ≈ ${fmtH(r.hours)}.`, 'info'); } else this.error(r.reason); }
         else if (act === 'demolish') this.demolish(b);
         else if (act === 'move') this.setTool({ kind: 'move', id: b.id });
         else if (act === 'add') this.openAddDino(b);
@@ -1462,7 +1481,8 @@ window.DZ = window.DZ || {};
         <p>Construisez des <b>chemins</b> depuis l'entrée, des <b>enclos</b> reliés aux chemins, puis installez-y des <b>dinosaures</b>. Les visiteurs paient un billet, se promènent, regardent les enclos et dépensent dans les boutiques et restaurants. Gagnez un maximum d'argent pour agrandir le parc !</p>
         <p>Ajoutez des <b>toilettes</b>, des <b>restaurants</b> et des <b>poubelles</b> pour garder des visiteurs satisfaits. La <b>note du parc</b> dépend de leur satisfaction, de la propreté, de la diversité des espèces, de la qualité des enclos et du bien-être des animaux. Elle débloque de nouvelles espèces.</p>
         <p>⚠️ Les <b>carnivores</b> ne cohabitent qu'avec leur propre espèce : ils chassent les autres (les petites espèces et les bébés surtout ; les grandes se défendent) et se battent avec les autres prédateurs.</p>
-        <p>🚨 Derrière une clôture trop faible, un dinosaure peut <b>s'évader</b> (surtout les carnivores ; les murs de verre du niveau 3 tiennent toujours). Les visiteurs paniquent, la note baisse et la peur éloigne les visiteurs pendant quelques jours. <b>Si un carnivore évadé attaque un visiteur, la partie est perdue.</b> Cliquez sur le bandeau rouge, puis <b>Capturer</b> : la vétérinaire le rattrape et l'endort, l'hélicoptère le ramène dans l'enclos choisi.</p>
+        <p>🔧 Les <b>clôtures s'usent</b> avec le temps et sous les charges des gros animaux : surveillez leur état dans le panneau de l'enclos, réparez-les ou cochez l'entretien automatique.</p>
+        <p>🚨 Derrière une clôture faible ou abîmée, un dinosaure peut <b>s'évader</b> (surtout les carnivores ; les murs de verre du niveau 3 tiennent tant qu'ils sont entretenus). Les visiteurs paniquent, la note baisse et la peur éloigne les visiteurs pendant quelques jours. <b>Si un carnivore évadé attaque un visiteur, la partie est perdue.</b> Cliquez sur le bandeau rouge, puis <b>Capturer</b> : la vétérinaire le rattrape et l'endort, l'hélicoptère le ramène dans l'enclos choisi.</p>
         <p>🌉 Une <b>passerelle</b> relie deux enclos terrestres face à face (onglet Enclos, ou panneau de l'enclos) : les dinosaures passent de l'un à l'autre, au-dessus des allées. 🔗 Deux enclos terrestres qui se touchent peuvent être <b>réunis</b> en un seul. ⚔️ Deux <b>mâles adultes</b> d'une même espèce finissent par se battre, surtout chez les espèces territoriales : le vaincu peut être blessé ; une passerelle lui permet de s'éloigner.</p>
         <p>🔭 Une <b>passerelle d'observation</b> (onglet Chemins) fait passer les visiteurs au-dessus d'un enclos : la meilleure vue sur les dinosaures. 🛝 Les <b>aires de jeux</b> (onglet Services) amusent les enfants et rendent les familles plus heureuses. 🚁 Pour changer un dinosaure d'enclos, sélectionnez-le puis <b>Transférer</b> : une vétérinaire l'endort et un hélicoptère le dépose dans son nouvel enclos.</p>
         <div class="keys">
@@ -1506,6 +1526,7 @@ window.DZ = window.DZ || {};
       g.on('kill', () => this.sound.crowdReact(g.s.rating >= 3.5 ? 'ooh' : 'peur'));
       g.on('constructed', (b) => { if (C.buildings[b.type].cat !== 'deco') this.sound.play('upgrade'); });
       g.on('mapChanged', () => { this.mmDirty = true; });
+      g.on('fenceHit', (e) => this.sound.play('clash', { pos: this.pos3(e.x, e.y, 0.4), sp: e.sp }));
       g.on('dart', (tr) => this.sound.play('dart', { pos: this.pos3(tr.d.x, tr.d.y, 0.4) }));
       g.on('transferred', (tr) => { if (this.panelSel && this.panelSel.kind === 'dino' && this.panelSel.id === tr.d.id) this.renderPanel(); });
     }
