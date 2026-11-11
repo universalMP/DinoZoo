@@ -127,7 +127,8 @@
       game.on('dinoBorn', (d) => this.burst3(d.x, d.y, 0.3, 'sparkle'));
       game.on('roar', (d) => { if ((d.sp === 'trex' || d.sp === 'spinosaurus') && this.cam.dist < 25 && Math.hypot(d.x - this.cam.tx, d.y - this.cam.tz) < this.cam.dist * 1.2) this.shake = Math.max(this.shake, d.sp === 'trex' ? 1 : 0.6); });
       game.on('splash', (d) => this.burst3(d.x, d.y, 0.3, 'splash'));
-      game.on('escape', () => { this.shake = 1.2; });
+      game.on('escape', (e) => { this.shake = 0.4 + 0.8 * (e.danger || 1); this.burst3(e.x, e.y, 0.8, 'dust'); this.burst3(e.x, e.y, 0.5, 'build'); });
+      game.on('attack', (e) => { this.shake = 1.4; this.burst3(e.x, e.y, 0.7, 'dust'); });
     }
 
     /* ------------------------------------------------------------------
@@ -1359,6 +1360,13 @@
           }
         }
       }
+      // dinosaures en liberté : anneau rouge qui pulse
+      for (const p of this.poses || []) {
+        if (!p.d.loose || (p.d.tr && p.d.tr.hold)) continue;
+        const m = M4.create(); M4.translate(m, p.x, p.y + 0.05, p.z); M4.rotY(m, -t * 1.2); const k = p.r * (1.1 + Math.sin(t * 6) * 0.12); M4.scale(m, k, 1, k);
+        gl.uniform3fv(lit.u.uTint, [1, 0.3, 0.22]); gl.uniform1f(lit.u.uTintAmt, 1); gl.uniform1f(lit.u.uAlpha, 0.75); gl.uniform1f(lit.u.uUnlit, 1);
+        this.drawMesh(lit, this.ringMesh, m);
+      }
       if (this.avatarPos) {
         const a = this.avatarPos, m = M4.create();
         M4.translate(m, a.x, a.y + 0.03, a.z); M4.rotY(m, -t * 0.6); M4.scale(m, 0.3, 1, 0.3);
@@ -1479,6 +1487,17 @@
           o.fillStyle = 'rgba(230,187,92,0.92)'; this.rrect(o, sp.x - tw / 2, sp.y - 15, tw, 20, 10); o.fill();
           o.fillStyle = '#2a1e10'; o.fillText(label, sp.x, sp.y);
         }
+      }
+      // dinosaures en liberté
+      for (const p of this.poses || []) {
+        if (!p.d.loose || p.d.tr) continue;
+        const s2 = this.project(p.x, p.y + (p.h || 0.3) + 0.5, p.z);
+        if (!s2) continue;
+        const txt = `🚨 ${p.d.name} en liberté`;
+        o.font = '700 12px "Trebuchet MS", sans-serif'; o.textAlign = 'center';
+        const tw = o.measureText(txt).width + 18;
+        o.fillStyle = `rgba(150,30,20,${0.82 + Math.sin(t * 6) * 0.1})`; this.rrect(o, s2.x - tw / 2, s2.y - 15, tw, 21, 10); o.fill();
+        o.fillStyle = '#fff2ec'; o.fillText(txt, s2.x, s2.y);
       }
       // transferts : étape en cours au-dessus de l'animal
       if (this.cam.dist < 45) for (const tr of g.transfers) {

@@ -356,7 +356,7 @@ window.DZ = window.DZ || {};
   P.rivalsIn = function (b) {
     const bySp = {};
     for (const d of this.s.dinos) {
-      if (d.enc !== b.id || d.sex !== 'M' || d.young) continue;
+      if (d.enc !== b.id || d.sex !== 'M' || d.young || d.loose) continue;
       const sp = DZ.SPECIES[d.sp];
       if (!sp.terr || sp.habitat !== 'land') continue;
       (bySp[d.sp] = bySp[d.sp] || []).push(d);
@@ -400,7 +400,7 @@ window.DZ = window.DZ || {};
       const riv = this.rivalsIn(b);
       for (const sp in riv) {
         if (b.calm && b.calm[sp] > now) continue;
-        const males = riv[sp].filter((d) => !d.fight && !d.hunt && !d.cross && !d.tr && !d.sick && d.state !== 'rest');
+        const males = riv[sp].filter((d) => !d.fight && !d.hunt && !d.cross && !d.tr && !d.loose && !d.sick && d.state !== 'rest');
         if (males.length < 2) continue;
         const terr = DZ.SPECIES[sp].terr;
         const crowd = U.clamp(this.usedSpace(b) / Math.max(1, this.capacity(b)) - 0.6, 0, 0.5) * 2;
@@ -599,7 +599,7 @@ window.DZ = window.DZ || {};
       if (this.hunts.some((h) => h.enc === b.id)) continue; // une chasse à la fois par enclos
       const dinos = this.dinosIn(b);
       if (!dinos.some((d) => DZ.SPECIES[d.sp].predator)) continue;
-      const free = (d) => !d.fight && !d.hunt && !d.cross && !d.tr;
+      const free = (d) => !d.fight && !d.hunt && !d.cross && !d.tr && !d.loose;
       for (const pred of dinos) {
         const sp = DZ.SPECIES[pred.sp];
         if (!sp.predator || pred.young || pred.sick || !free(pred) || pred.sated > now) continue;

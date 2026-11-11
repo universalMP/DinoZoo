@@ -116,6 +116,7 @@ window.DZ = window.DZ || {};
     // affichage
     setTimeout(() => {
       document.getElementById('loading').classList.add('done');
+      if (game.s.over) { ui.showGameOver(); return; } // partie perdue lors de la dernière session
       if (!game.s.player.set) {
         askPlayer(resumed
           ? { title: 'Qui dirige le parc ?', text: 'Nouveauté : votre parc a maintenant un directeur ou une directrice. Choisissez votre nom, votre genre et votre avatar : il se rendra sur place à chacune de vos actions.', go: 'Reprendre la partie' }

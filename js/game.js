@@ -16,6 +16,8 @@ window.DZ = window.DZ || {};
   const rr = (a, b) => a + (b - a) * R();
   const HOUR_LEN = C.time.daySeconds / (C.time.endHour - C.time.startHour);
   const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  /* Vitesse de fuite : une famille avec de jeunes enfants court moins vite. */
+  const panicK = (g) => g.panic ? (g.kids ? 1.3 : 1.8) : 1;
 
   DZ.TER = TER;
 
@@ -348,7 +350,13 @@ window.DZ = window.DZ || {};
           if (d && b) { d.enc = b.id; const p = this.randomPointIn(b, d.sp); d.x = p.x; d.y = p.y; }
         }
         delete data.xfers;
-        for (const d of this.s.dinos) { if (!d.sex) d.sex = d.id % 2 ? 'M' : 'F'; this._initDinoTransient(d); const b = this.s.buildings[d.enc]; if (b) this.keepInside(d, b, DZ.SPECIES[d.sp]); }
+        for (const d of this.s.dinos) {
+          if (!d.sex) d.sex = d.id % 2 ? 'M' : 'F';
+          this._initDinoTransient(d);
+          d.loose = d.loose ? { phase: 'roam', t: 0 } : null; // toujours en liberté
+          const b = this.s.buildings[d.enc];
+          if (b && !d.loose) this.keepInside(d, b, DZ.SPECIES[d.sp]);
+        }
         this._initPlayer();
         this.visitors = [];
         this._netChanged();
@@ -369,7 +377,7 @@ window.DZ = window.DZ || {};
       const dinos = s.dinos.map((d) => ({
         id: d.id, sp: d.sp, enc: d.enc, name: d.name, x: d.x, y: d.y, face: d.face,
         upHab: d.upHab, upCare: d.upCare, sick: d.sick, sickDays: d.sickDays, happiness: d.happiness, born: d.born,
-        sex: d.sex, young: d.young ? 1 : 0, injured: d.injured ? 1 : 0, bruise: d.bruise
+        sex: d.sex, young: d.young ? 1 : 0, injured: d.injured ? 1 : 0, bruise: d.bruise, loose: d.loose ? 1 : 0
       }));
       if (this.pl) { s.player.x = Math.round(this.pl.x * 100) / 100; s.player.y = Math.round(this.pl.y * 100) / 100; }
       const buildings = {};
@@ -607,6 +615,7 @@ window.DZ = window.DZ || {};
       const b = this.s.buildings[id];
       if (!b || b.fixed) return { ok: false, reason: 'Ce bâtiment ne peut pas être démoli' };
       if (this.transferBusy(b)) return { ok: false, reason: 'Un dinosaure est en cours de transfert' };
+      if (this.s.dinos.some((d) => d.enc === b.id && d.loose)) return { ok: false, reason: 'Un de ses dinosaures est en liberté : capturez-le d\'abord' };
       let refund = Math.round(b.invested * C.economy.refundRate);
       for (const d of this.s.dinos.filter((d) => d.enc === b.id)) refund += this._dinoValue(d) * C.economy.dinoSellRate;
       for (const dl of this.s.deliveries) if (dl.enc === b.id && !dl.dropped && !dl.cancelled) { refund += C.dinos[dl.sp].price; dl.cancelled = true; }
@@ -637,6 +646,7 @@ window.DZ = window.DZ || {};
       if (this.linksOf(b).length) return { ok: false, reason: 'Démolissez d\'abord ses passerelles' };
       if (this.skyRunsOver(b).length) return { ok: false, reason: 'Démolissez d\'abord la passerelle d\'observation' };
       if (this.transferBusy(b)) return { ok: false, reason: 'Un dinosaure est en cours de transfert' };
+      if (this.s.dinos.some((d) => d.enc === b.id && d.loose)) return { ok: false, reason: 'Un de ses dinosaures est en liberté : capturez-le d\'abord' };
       const c = this.canPlace(b.type, nx, ny, b.id, true);
       if (!c.ok) return c;
       const old = { x0: b.x - 1, y0: b.y - 1, x1: b.x + b.w, y1: b.y + b.h };
@@ -945,7 +955,7 @@ window.DZ = window.DZ || {};
         const b = s.buildings[id];
         if (!this.isEnclosure(b) || b.cons) continue;
         const bySp = {};
-        for (const d of this.dinosIn(b)) if (!d.young) (bySp[d.sp] = bySp[d.sp] || []).push(d);
+        for (const d of this.dinosIn(b)) if (!d.young && !d.loose) (bySp[d.sp] = bySp[d.sp] || []).push(d);
         b.breed = b.breed || {};
         for (const sp in b.breed) if (!bySp[sp]) delete b.breed[sp];
         for (const sp in bySp) {
@@ -1005,6 +1015,7 @@ window.DZ = window.DZ || {};
       const d = this.s.dinos.find((x) => x.id === id);
       if (!d) return { ok: false };
       if (d.tr) return { ok: false, reason: 'Transfert en cours' };
+      if (d.loose) return { ok: false, reason: 'Capturez-le d\'abord' };
       const refund = Math.round(this._dinoValue(d) * C.economy.dinoSellRate);
       this.playerTask(d.x, d.y, 'care', d.enc);
       this.s.dinos = this.s.dinos.filter((x) => x !== d);
@@ -1077,7 +1088,7 @@ window.DZ = window.DZ || {};
 
     enclosureAttraction(b) {
       let a = 0;
-      for (const d of this.s.dinos) if (d.enc === b.id) a += this.dinoAttraction(d);
+      for (const d of this.s.dinos) if (d.enc === b.id && !d.loose) a += this.dinoAttraction(d);
       return a * C.enclosureLevels.attraction[b.level - 1];
     }
 
@@ -1090,6 +1101,21 @@ window.DZ = window.DZ || {};
         if (DZ.encSDF(b, x, y, sh) < -margin) return { x, y };
       }
       return { x: sh.cx, y: sh.cy };
+    }
+    /* Le trajet en ligne droite reste-t-il dans l'enclos ? (enclos agrandi : la forme peut avoir des coins rentrants) */
+    segmentInside(b, x0, y0, x1, y1, m, sh) {
+      sh = sh || DZ.encShape(b);
+      const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 0.5));
+      for (let k = 1; k <= n; k++) if (DZ.encSDF(b, x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n, sh) > -m) return false;
+      return true;
+    }
+    /* Destination d'une promenade : atteignable en ligne droite sans traverser la clôture. */
+    walkGoal(b, d) {
+      if (!b.parts) return this.randomPointIn(b, d.sp);
+      const sh = DZ.encShape(b), m = this.shapeMargin(b, DZ.SPECIES[d.sp]) * 0.7;
+      for (let k = 0; k < 14; k++) { const p = this.randomPointIn(b, d.sp); if (this.segmentInside(b, d.x, d.y, p.x, p.y, m, sh)) return p; }
+      for (let k = 0; k < 10; k++) { const p = this.pointNear(b, DZ.SPECIES[d.sp], d.x, d.y, 3); if (p && this.segmentInside(b, d.x, d.y, p.x, p.y, m, sh)) return p; }
+      return { x: d.x, y: d.y };
     }
     /* Point au hasard dans un rayon donné (pour les rapprochements et les fuites). */
     pointNear(b, sp, x, y, r) {
@@ -1104,11 +1130,13 @@ window.DZ = window.DZ || {};
       const def = C.buildings[b.type];
       if (def.kind === 'water') return 1.1;
       if (def.kind === 'air') return 0.9;
-      return 0.55 + (sp && sp.size === 'L' ? 0.5 : sp && sp.size === 'M' ? 0.25 : 0);
+      // assez loin de la clôture pour que la tête et la queue des plus longs ne la traversent pas
+      return Math.max(0.55 + (sp && sp.size === 'L' ? 0.5 : sp && sp.size === 'M' ? 0.25 : 0), sp && sp.len ? 0.2 + sp.len * 0.42 : 0);
     }
     /* Ramène un animal dans la forme de son enclos. */
-    keepInside(d, b, sp) {
-      const sh = DZ.encShape(b), m = this.shapeMargin(b, sp);
+    keepInside(d, b, sp, sh) {
+      sh = sh || DZ.encShape(b);
+      const m = this.shapeMargin(b, sp);
       const sd = DZ.encSDF(b, d.x, d.y, sh);
       if (sd > -m && sh.multi) {
         // forme quelconque : on suit la pente de la distance signée
@@ -1146,11 +1174,24 @@ window.DZ = window.DZ || {};
         if (!b) continue;
         const sp = DZ.SPECIES[d.sp];
         d.t += dt;
-        if (d.fight || d.hunt || (d.tr && d.tr.hold)) continue; // combats, chasses et transferts sont animés à part
+        if (d.tr && d.tr.hold) continue; // transfert : animé à part
+        if (d.loose) { this._updateLoose(d, sp, dt); continue; } // évadé, en liberté dans le parc
+        if (d.fight || d.hunt) continue; // combats, chasses et transferts sont animés à part
         if (d.cross) { this._updateCrossing(d, b, sp, dt); continue; }
         if (sp.habitat === 'air') this._updateFlyer(d, b, sp, dt);
         else if (sp.habitat === 'water') this._updateSwimmer(d, b, sp, dt);
         else this._updateWalker(d, b, sp, dt);
+      }
+      // enclos agrandis (formes à coins rentrants) : personne ne traverse la clôture,
+      // même en se battant ou en chassant
+      let shapes = null;
+      for (const d of this.s.dinos) {
+        const b = this.s.buildings[d.enc];
+        if (!b || !b.parts || d.loose || d.cross || (d.tr && d.tr.lift > 0)) continue;
+        shapes = shapes || new Map();
+        let sh = shapes.get(b.id);
+        if (!sh) { sh = DZ.encShape(b); shapes.set(b.id, sh); }
+        this.keepInside(d, b, DZ.SPECIES[d.sp], sh);
       }
     }
 
@@ -1182,7 +1223,7 @@ window.DZ = window.DZ || {};
       else if (r < roarP + (feeding ? 0.45 : 0.18)) { d.state = 'eat'; d.timer = rr(3, 6); d.anim = 0; }
       else if (r < roarP + 0.28 + (d.sick ? 0.4 : 0)) { d.state = 'rest'; d.timer = rr(4, 8); d.anim = 0; }
       else {
-        const p = this.randomPointIn(b, d.sp);
+        const p = this.walkGoal(b, d);
         d.gx = p.x; d.gy = p.y; d.state = 'walk'; d.timer = 0; d.anim = 0;
       }
     }
@@ -1243,7 +1284,7 @@ window.DZ = window.DZ || {};
         if (def.cat === 'enclos') {
           if (!this.isConnected(b)) continue;
           const mult = C.enclosureLevels.attraction[b.level - 1];
-          for (const d of this.s.dinos) if (d.enc === b.id) {
+          for (const d of this.s.dinos) if (d.enc === b.id && !d.loose) {
             species.add(d.sp); families.add(DZ.SPECIES[d.sp].family);
             (perSpecies[d.sp] = perSpecies[d.sp] || []).push(this.dinoAttraction(d) * mult);
           }
@@ -1279,6 +1320,7 @@ window.DZ = window.DZ || {};
       const ev = this.s.event;
       if (ev === 'affluence') n *= C.events.affluenceMult;
       if (ev === 'storm') n *= C.events.stormMult;
+      n *= 1 - (this.s.fear || 0); // la peur après une évasion éloigne les visiteurs
       return Math.round(n);
     }
 
@@ -1312,7 +1354,7 @@ window.DZ = window.DZ || {};
 
     update(dtReal) {
       const sp = this.speed;
-      if (!sp || !this.s) return;
+      if (!sp || !this.s || this.s.over) return;
       let simDt = Math.min(dtReal, 0.1) * sp;
       const n = Math.ceil(simDt / 0.05);
       const step = simDt / n;
@@ -1321,6 +1363,7 @@ window.DZ = window.DZ || {};
 
     step(dt) {
       const s = this.s;
+      if (s.over) return; // partie terminée
       const prevHour = s.hour;
       s.hour += dt / HOUR_LEN;
       const dh = dt / HOUR_LEN;
@@ -1368,14 +1411,8 @@ window.DZ = window.DZ || {};
       s.today = { day: s.day, visitors: 0, tickets: 0, shops: 0, food: 0, upkeepDinos: 0, upkeepBuildings: 0, construction: 0, dinos: 0, events: 0, satSum: 0, satN: 0 };
       s.event = null; s.weather = null; s.criticAt = null; s.escapeAt = null;
       if (!first && s.day >= C.events.firstDay && R() < C.events.chance) this._rollEvent();
-      // évasion possible si un grand prédateur vit derrière une simple palissade
-      for (const id in s.buildings) {
-        const b = s.buildings[id];
-        if (b.level !== 1 || !this.isEnclosure(b)) continue;
-        if (this.dinosIn(b).some((d) => DZ.SPECIES[d.sp].predator && DZ.SPECIES[d.sp].size === 'L') && R() < C.events.escapeChance) {
-          s.escapeAt = rr(10, 16); s.escapeEnc = b.id; break;
-        }
-      }
+      // évasion possible derrière une clôture trop faible (voir escapes.js)
+      if (!first) this._scheduleEscape();
       this.dailyTarget = this.computeDailyTarget();
       this.arrivalAcc = 0;
       this.emit('dayStart', s.day);
@@ -1412,21 +1449,6 @@ window.DZ = window.DZ || {};
       this.notify('🤒', `${this.who(d)} est malade ! Soignez-${d.sex === 'F' ? 'la' : 'le'} (${U.money(this.treatCost(d))}) avant ${C.events.sickDaysToDeath} jours.`, 'bad', { type: 'treat', dino: d.id });
     }
 
-    _triggerEscape() {
-      const s = this.s;
-      const b = s.buildings[s.escapeEnc];
-      s.escapeAt = null;
-      if (!b || b.level !== 1) return;
-      const d = this.dinosIn(b).find((x) => DZ.SPECIES[x.sp].predator && DZ.SPECIES[x.sp].size === 'L');
-      if (!d) return;
-      const cost = C.events.escapeRepair;
-      this._spend(cost, 'eventsCost');
-      s.rating = U.clamp(s.rating - C.events.escapeRatingPenalty, 0, 5);
-      for (const g of this.visitors) { g.panic = true; g.sat -= 20; g.mood = 'peur'; g.bubbleT = 0; if (g.state !== 'exit') { g.hidden = false; this.goExit(g); } }
-      this.emit('escape', { dino: d, building: b });
-      this.notify('🚨', `Alerte ! ${this.who(d)} a enfoncé la palissade ! Les visiteurs fuient. Réparation : ${U.money(cost)}. Améliorez la clôture !`, 'bad', { type: 'select', building: b.id });
-    }
-
     endDay() {
       const s = this.s, t = s.today, E = C.events;
       // départ forcé des derniers visiteurs
@@ -1459,6 +1481,8 @@ window.DZ = window.DZ || {};
         this.emit('dinoRemoved', d);
       }
       // (la prédation se joue pendant la journée : voir les chasses dans habitats.js)
+      // la peur s'estompe de jour en jour
+      if (s.fear) { s.fear *= C.escape.fearDecay; if (s.fear < 0.02) s.fear = 0; }
       this._updateHappiness();
       // reproduction et croissance des petits
       this._breed();
@@ -1696,9 +1720,11 @@ window.DZ = window.DZ || {};
     _spawn(dh) {
       const s = this.s, T = C.time;
       if (s.hour < T.openHour || s.hour > T.lastEntryHour) return;
+      const open = this.looseOpenFactor(); // dinosaure en liberté : entrées réduites, ou parc fermé
+      if (open <= 0) return;
       const x = (s.hour - T.openHour) / (T.lastEntryHour - T.openHour);
       const rate = this.dailyTarget * this._arrivalShape(x) / (this._norm * (T.lastEntryHour - T.openHour));
-      this.arrivalAcc += rate * dh * (1 + (R() - 0.5) * 2 * C.visitors.randomness);
+      this.arrivalAcc += rate * open * dh * (1 + (R() - 0.5) * 2 * C.visitors.randomness);
       const scale = this.agentScale();
       while (this.arrivalAcc >= 2.4 * scale) {
         const g = this._spawnGroup(scale);
@@ -1752,6 +1778,8 @@ window.DZ = window.DZ || {};
         if (g.bladder > 88) g.sat -= V.needPenalty * dh;
         g.sat = U.clamp(g.sat, 0, 100);
         g.bubbleT -= dt;
+        // dinosaure en liberté : temps de réaction avant la fuite (figés de peur tout près)
+        if (g.fearT > 0) { g.fearT -= dt; if (g.fearT <= 0) this._flee(g); else if (g.frozen) continue; }
         this._updateMood(g);
         switch (g.state) {
           case 'enter': {
@@ -1768,7 +1796,7 @@ window.DZ = window.DZ || {};
             break;
           }
           case 'exit': {
-            const done = this._moveStraight(g, ENT.tileX + 0.5 + g.lane * 0.5, H + 0.8, dt * (g.panic ? 1.8 : 1));
+            const done = this._moveStraight(g, ENT.tileX + 0.5 + g.lane * 0.5, H + 0.8, dt * panicK(g));
             if (done) dead.push(g);
             break;
           }
@@ -1802,7 +1830,7 @@ window.DZ = window.DZ || {};
 
     _moveStraight(g, x, y, dt) {
       const dx = x - g.x, dy = y - g.y, d = Math.hypot(dx, dy);
-      const st = C.visitors.speed * dt * (g.panic ? 1.8 : 1);
+      const st = C.visitors.speed * dt * panicK(g);
       if (d <= st) { g.x = x; g.y = y; return true; }
       g.x += dx / d * st; g.y += dy / d * st;
       g.dirX = dx / d; g.dirY = dy / d;
@@ -1811,7 +1839,7 @@ window.DZ = window.DZ || {};
     }
 
     _moveAlong(g, dt) {
-      let budget = C.visitors.speed * dt * (g.panic ? 1.8 : 1);
+      let budget = C.visitors.speed * dt * panicK(g);
       let guard = 6;
       while (budget > 1e-4 && guard-- > 0) {
         if (g.nx === null) {

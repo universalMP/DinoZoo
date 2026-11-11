@@ -23,7 +23,8 @@ Construisez des chemins depuis l'entrée, des enclos reliés à ces chemins, pui
 - **Des aires de jeux** pour les enfants : balançoires, toboggan, dino à grimper.
 - **Des transferts** : une vétérinaire endort le dinosaure, un hélicoptère l'emporte dans un filet jusqu'à son nouvel enclos.
 - **3 niveaux** pour chaque enclos, boutique, restaurant, toilettes et aire de jeux.
-- Événements aléatoires : affluence, orages, maladies, critiques, mécènes… et évasions si vos clôtures sont trop faibles.
+- Événements aléatoires : affluence, orages, maladies, critiques, mécènes…
+- **Des évasions** si vos clôtures sont trop faibles : l'animal erre dans le parc, la foule panique. Rattrapez-le vite avec la vétérinaire et l'hélicoptère : si un carnivore attaque un visiteur, la partie est perdue.
 - Cycle jour et nuit, météo.
 - **Son 3D haut de gamme**, entièrement synthétisé : voix propres à chaque espèce, pluie, vent et tonnerre d'orage, vagues, rivière, oiseaux, insectes, foule de visiteurs.
 - **Six thèmes musicaux orchestraux originaux** qui suivent le moment de la journée et les événements (🎵 pour couper la musique, volumes dans le menu ☰).
@@ -64,6 +65,7 @@ js/util.js          outils (aléatoire, bruit, couleurs)
 js/game.js          logique de jeu (sans rendu)
 js/habitats.js      passerelles, enclos réunis, combats entre mâles, prédation
 js/amenities.js     passerelles d'observation, aires de jeux, transferts de dinosaures
+js/escapes.js       évasions, panique, fin de partie
 js/r3d/             rendu 3D WebGL 2 : socle (maths, shaders), maillages, terrain et eau,
                     modèles (bâtiments, arbres, visiteurs), dinosaures articulés, moteur
 js/audio.js         environnement sonore 3D (Web Audio)

@@ -305,7 +305,7 @@ window.DZ = window.DZ || {};
     if (!d) return { ok: false, reason: 'Animal introuvable' };
     if (d.tr) return { ok: false, reason: 'Transfert déjà en cours' };
     if (!b || !this.isEnclosure(b)) return { ok: false, reason: 'Choisissez un enclos' };
-    if (b.id === d.enc) return { ok: false, reason: 'C\'est déjà son enclos' };
+    if (b.id === d.enc && !d.loose) return { ok: false, reason: 'C\'est déjà son enclos' };
     if (b.cons) return { ok: false, reason: 'Enclos encore en construction' };
     const sp = DZ.SPECIES[d.sp], def = C.buildings[b.type];
     if (!this.habitatOk(d.sp, b)) {
@@ -314,11 +314,12 @@ window.DZ = window.DZ || {};
       if (def.kind !== 'land') return { ok: false, reason: 'Il faut un enclos terrestre' };
       return { ok: false, reason: 'Enclos trop petit (' + (sp.size === 'L' ? 'grand' : 'moyen') + ' enclos requis)' };
     }
-    if (this.usedSpace(b) + this.dinoSpace(d) > this.capacity(b)) return { ok: false, reason: 'Plus de place dans cet enclos' };
+    // un évadé qui rentre chez lui y a gardé sa place
+    if (this.usedSpace(b) + (d.loose && b.id === d.enc ? 0 : this.dinoSpace(d)) > this.capacity(b)) return { ok: false, reason: 'Plus de place dans cet enclos' };
     const cost = this.transferCost(d);
     if (this.s.money < cost) return { ok: false, reason: 'Fonds insuffisants', cost };
     let rivals = 0;
-    if (d.sex === 'M' && !d.young && sp.terr) rivals = this.dinosIn(b).filter((o) => o.sp === d.sp && o.sex === 'M' && !o.young).length;
+    if (d.sex === 'M' && !d.young && sp.terr) rivals = this.dinosIn(b).filter((o) => o !== d && o.sp === d.sp && o.sex === 'M' && !o.young).length;
     return { ok: true, cost, warning: this.wouldConflict(d.sp, b), rivals };
   };
 
@@ -341,20 +342,21 @@ window.DZ = window.DZ || {};
       sx: west ? -45 : W + 45, sy: U.clamp(d.y - 30 + R() * 20, -20, H + 20), tx: tp.x, ty: tp.y
     };
     tr.vet = { x: ENT.tileX + 0.5, y: ENT.tileY - 1.5, dirX: 0, dirY: -1, phase: 0, anim: 0, speed: 0, state: 'walk', act: null, path: [], pi: 0 };
-    this._vetGo(tr.vet, { x: d.x, y: d.y, act: 'care', bid: from.id });
+    // un évadé : la vétérinaire part à sa poursuite dans le parc
+    this._vetGo(tr.vet, d.loose ? { x: d.x, y: d.y, act: 'care', bid: null } : { x: d.x, y: d.y, act: 'care', bid: from.id }, !!d.loose);
     d.tr = tr;
     this.transfers.push(tr);
     this.emit('transferStart', tr);
     return { ok: true, transfer: tr };
   };
 
-  P._vetGo = function (v, task) {
+  P._vetGo = function (v, task, urgent) {
     const Pl = C.player;
     v.path = this._findPath(v.x, v.y, task);
     v.pi = 0;
     let L = 0, px = v.x, py = v.y;
     for (const [x, y] of v.path) { L += Math.hypot(x - px, y - py); px = x; py = y; }
-    v.speed = Math.max(Pl.walkSpeed, L / Pl.maxTripSeconds);
+    v.speed = Math.max(Pl.walkSpeed, L / (urgent ? C.transfer.chaseSeconds : Pl.maxTripSeconds));
     v.state = 'walk';
     if (L < 0.05) v.state = 'arrived';
   };
@@ -401,6 +403,7 @@ window.DZ = window.DZ || {};
   }
 
   P.transferPhaseText = function (tr) {
+    if (tr.d.loose && tr.phase === 'vet') return '🩺 La vétérinaire le poursuit';
     return { vet: '🩺 La vétérinaire arrive', enter: '🩺 La vétérinaire s\'approche', aim: '💉 Fléchette anesthésiante', drowsy: '😴 Il s\'endort', heliIn: '🚁 L\'hélicoptère arrive', lift: '🚁 Levage dans le filet', carry: '🚁 En vol vers son nouvel enclos', drop: '🚁 Dépose en douceur', leave: '😴 Réveil dans son nouvel enclos', done: '' }[tr.phase] || '';
   };
 
@@ -428,11 +431,28 @@ window.DZ = window.DZ || {};
       }
       switch (tr.phase) {
         case 'vet':
+          // animal en liberté : elle ajuste sa route s'il s'est éloigné
+          if (d.loose && v) {
+            tr.chase = (tr.chase || 0) - dt;
+            const end = v.path.length ? v.path[v.path.length - 1] : [v.x, v.y];
+            const far = Math.hypot(end[0] - d.x, end[1] - d.y) > 3.5;
+            const near = Math.hypot(v.x - d.x, v.y - d.y);
+            if (near < C.transfer.dartRange) {
+              // à portée de fléchette : elle tire sans attendre
+              setPhase(tr, 'aim'); tr.hold = true; v.state = 'arrived'; v.path = []; v.act = 'aim'; v.anim = 0;
+              d.state = 'idle'; d.moving = 0; d.run = 0;
+              const l = near || 1; v.dirX = (d.x - v.x) / l; v.dirY = (d.y - v.y) / l;
+              break;
+            }
+            if ((v.state === 'walk' && far && tr.chase <= 0) || v.state === 'arrived') {
+              tr.chase = 1; this._vetGo(v, { x: d.x, y: d.y, act: 'care', bid: null }, true);
+            }
+          }
           if (v && v.state === 'arrived') {
             setPhase(tr, 'enter'); tr.hold = true;
             d.state = 'idle'; d.timer = 99; d.moving = 0; d.run = 0;
             // sous une passerelle : la vétérinaire le fait d'abord avancer à découvert
-            tr.clear = clearSpot(this, d);
+            tr.clear = d.loose ? null : clearSpot(this, d);
             const p = tr.clear ? aimSpot(this, tr, tr.clear) : aimSpot(this, tr);
             v.path = [[p.x, p.y]]; v.pi = 0; v.state = 'walk'; v.speed = C.player.walkSpeed;
           }
@@ -509,12 +529,20 @@ window.DZ = window.DZ || {};
     tr.landed = true;
     if (!b) return;
     const from = this.s.buildings[tr.from];
+    const wasLoose = !!d.loose;
+    d.loose = null; d.run = 0;
     d.enc = b.id; d.x = tr.tx; d.y = tr.ty; d.gx = d.x; d.gy = d.y;
     this.keepInside(d, b, DZ.SPECIES[d.sp]);
     if (b.breed) delete b.breed[d.sp];
     if (from && from.breed) delete from.breed[d.sp];
     this._updateHappiness();
     this.emit('transferred', tr);
+    if (wasLoose) {
+      const left = this.looseDinos().length;
+      this.emit('recaptured', tr);
+      this.notify('✅', `${this.who(d)} est de retour dans un enclos.${left ? '' : ' Le parc est de nouveau sûr : les visiteurs reviennent.'}`, 'good', { type: 'select', building: b.id });
+      return;
+    }
     this.notify('🚁', `${this.who(d)} a ${d.sex === 'F' ? 'été déposée' : 'été déposé'} dans son nouvel enclos. ${d.sex === 'F' ? 'Elle' : 'Il'} se réveille doucement.`, 'good', { type: 'select', building: b.id });
   };
 

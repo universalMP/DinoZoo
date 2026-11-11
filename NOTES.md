@@ -2,6 +2,18 @@
 
 Décisions prises pendant le développement, là où la demande était ambiguë ou muette.
 
+## Évasions et fin de partie
+
+- **Qui s'évade** : n'importe quel dinosaure terrestre adulte, derrière une clôture de niveau 1 ou 2 (les murs de verre du niveau 3 tiennent toujours ; volières et lagons ne sont pas concernés). Risque par animal et par jour : petit herbivore 0,6 %, moyen 1,2 %, grand 3 % ; ×5 pour un carnivore (un grand carnivore derrière une palissade : 15 % par jour, comme avant) ; ×0,2 avec une clôture électrifiée ; ×1,8 si l'animal est malheureux. Au plus une évasion par jour dans le parc, à partir du jour 3, entre 9 h 30 et 16 h 30. Le panneau de l'enclos affiche ce risque.
+- **Déroulé** : l'animal enfonce la clôture au plus près (poussière, alarme, tremblement selon le danger) et erre librement dans le parc, hors des enclos, de l'eau et des rochers. Un bandeau rouge reste affiché tant qu'il est libre (un clic le montre), avec une étiquette et un anneau rouge sur l'animal et un point rouge sur la minicarte.
+- **Danger** (0 à 1) : petit herbivore 0,08, moyen 0,2, grand 0,35 ; carnivore petit 0,55, moyen 0,75, grand 1 (un bébé compte moitié). Il règle tout le reste :
+  - **panique** : les visiteurs à moins de 4 à 20 cases (selon le danger) fuient vers la sortie et perdent de la satisfaction. Tout près de l'animal, ils restent d'abord figés de peur 1 à 2 s ; plus loin, ils réagissent après un délai (la nouvelle circule). Une famille avec de jeunes enfants court moins vite ;
+  - **entrées** : réduites (× 1 − danger), et parc fermé au-delà de 0,45 (tous les carnivores) tant que l'animal est libre ;
+  - **note** : −0,7 étoile × danger ; **peur** : la fréquentation baisse de 55 % × danger, puis la peur s'estompe (60 % restent chaque lendemain ; affichée dans le résumé du soir) ; **réparation** : 600 à 2 500 € selon la taille.
+- **Carnivore en liberté** : il rugit et flaire pendant 5 s, puis repère les visiteurs à 12 cases et charge (×2,4 à ×3,4 sa vitesse selon sa taille). **S'il atteint un visiteur, la partie est terminée** : les autorités ferment le parc. Une fenêtre l'annonce (jour atteint, gains), seule la nouvelle partie est possible, et elle se réaffiche si l'on recharge la page.
+- **Capture** : sélectionner l'animal, puis « 🚁 Capturer et ramener » et cliquer sur un enclos adapté (son enclos d'origine, réparé, a gardé sa place). Même prix qu'un transfert. La vétérinaire part de l'entrée et le rejoint en 4 s au plus, ajuste sa route s'il bouge, et tire dès qu'elle est à moins de 7 cases ; l'animal s'immobilise, s'endort, l'hélicoptère le ramène. Mesuré : un joueur qui lance la capture dans les 3 s n'a jamais perdu de visiteur ; à 10 s, c'est parfois trop tard. Dans une simulation de 40 jours avec un joueur qui capture aussitôt : 6 à 7 évasions, aucune attaque.
+- Pendant qu'un animal est libre, on ne peut ni le vendre, ni démolir ou déplacer son enclos.
+
 ## Passerelles d'observation, aires de jeux et transferts
 
 - **Passerelle d'observation** : outil « Passerelle d'observation » de l'onglet Chemins. On clique d'un côté de l'enclos, puis de l'autre (sur l'enclos ou à côté : le tracé s'arrête juste devant les clôtures ; au doigt, un toucher de plus pour confirmer). C'est un chemin surélevé, en ligne droite, d'une case de large, qui traverse un enclos terrestre ou un lagon, ou plusieurs enclos collés, sans interruption, sur 2 à 20 cases. Un escalier à chaque bout, posé sur une case de chemin hors de l'enclos (créée au besoin, au prix d'un chemin). La volière est exclue (son filet). Prix : 1 200 € + 340 € par case. Démolition entière (outil Démolir ou panneau, remboursement habituel) ; démolir l'enclos la démonte aussi. On ne peut pas retirer seul le chemin au pied de l'escalier. Un enclos survolé ne se déplace pas.
@@ -113,7 +125,7 @@ La grille des cases reste la règle du jeu (placement, chemins, collisions), mai
 - **Organisation** :
   - `js/config.js` : toutes les valeurs d'équilibrage (prix, revenus, attractivité, entretien, déblocages, événements) et la lumière du jour ;
   - `js/dinos.js` : données descriptives des espèces (nom, famille, régime, habitat, description) ;
-  - `js/game.js`, `js/habitats.js`, `js/amenities.js` : logique pure, sans DOM ni rendu (testable sous Node) ;
+  - `js/game.js`, `js/habitats.js`, `js/amenities.js`, `js/escapes.js` : logique pure, sans DOM ni rendu (testable sous Node) ;
   - `js/r3d/*` : tout l'affichage 3D (voir « Rendu 3D ») ;
   - `js/ui.js`, `js/tutorial.js` : interface ; `js/audio.js` : sons ; `js/save.js` : sauvegarde ; `js/main.js` : démarrage et boucle.
 - **Le rendu ne modifie jamais l'état du jeu**. Il écoute les événements du jeu (`spend`, `built`, `roar`…) pour ses effets (pièces, étincelles, tremblement).
@@ -137,7 +149,7 @@ La grille des cases reste la règle du jeu (placement, chemins, collisions), mai
 - **Améliorations des dinosaures** : « Habitat enrichi » (+20 % d'attractivité, +12 de bonheur) et « Soins premium » (+15 %, +10 de bonheur, maladies moins fréquentes).
 - **Cohabitation** : un prédateur ne cohabite qu'avec sa propre espèce. Un avertissement s'affiche à l'achat et dans le panneau de l'enclos ; tout l'enclos perd 20 de bonheur tant que le conflit dure. La prédation se joue pendant la journée (voir « Prédation »).
 - **Compsognathus** : en réalité un petit carnivore, il est rangé ici avec les « petits herbivores » comme demandé, et considéré comme inoffensif (non prédateur).
-- **Évasions** : un grand prédateur derrière une simple palissade (niveau 1) peut s'évader (15 % par jour) : alarme, visiteurs en fuite, réparation de 2 500 € et note en baisse. Améliorer la clôture supprime ce risque.
+- **Évasions** : voir « Évasions et fin de partie ».
 - **Événements aléatoires** (45 % de chances par jour à partir du jour 3) : forte affluence (×1,6), orage (×0,55, pluie, brume et éclairs l'après-midi), dinosaure malade (à soigner sous 3 jours sinon il meurt), visite d'un critique (la note évolue selon la satisfaction du jour), mécène (don).
 - **Jamais bloqué** : l'argent peut passer en négatif à cause de l'entretien, mais les visiteurs continuent à payer. Sous 2 500 €, la « Fondation paléontologique » verse une subvention de 8 000 € (au plus tous les 5 jours).
 - **Déplacer** un bâtiment est gratuit (les dinosaures le suivent). **Démolir** rembourse 60 % de l'investissement (construction + améliorations), et 50 % de la valeur des dinosaures revendus.

@@ -217,6 +217,8 @@ DZ.CONFIG = {
   transfer: {
     base: 500,                // vétérinaire, anesthésie et vol en hélicoptère
     rate: 0.04,               // plus une part du prix de l'animal
+    chaseSeconds: 4,          // animal évadé : la vétérinaire le rejoint en 4 s au plus (elle court, puis file en quad)
+    dartRange: 7,             // et tire sa fléchette dès qu'elle est à moins de 7 cases
     aim: 1.2,                 // secondes de jeu : la vétérinaire vise
     drowsy: 2.6,              // l'animal titube puis s'endort
     heliIn: 5,                // l'hélicoptère arrive
@@ -238,6 +240,28 @@ DZ.CONFIG = {
     ratingPenalty: 0.35,      // étoiles perdues par victime
     watchFear: 5,             // satisfaction perdue par les visiteurs qui regardent (si la note est basse)
     noticeHours: 6            // notifications des chasses ratées : au plus une par enclos dans cet intervalle
+  },
+
+  /* ---------- Évasions : l'animal sort de son enclos et erre dans le parc ---------- */
+  escape: {
+    fence: [1, 0.2, 0],                 // risque selon la clôture (niveau 1, 2 ; les murs de verre du niveau 3 tiennent)
+    base: { S: 0.006, M: 0.012, L: 0.03 }, // risque par animal adulte et par jour (herbivores)
+    predator: 5,                        // × pour les carnivores (grand carnivore derrière une palissade : 15 % par jour)
+    unhappy: 1.8,                       // × si l'animal est malheureux (bonheur < 40)
+    danger: { herb: { S: 0.08, M: 0.2, L: 0.35 }, pred: { S: 0.55, M: 0.75, L: 1 } }, // 0 inoffensif → 1 terrifiant
+    repair: { S: 600, M: 1500, L: 2500 }, // réparation de la clôture
+    rating: 0.7,                        // étoiles perdues (× danger)
+    fear: 0.55,                         // fréquentation perdue les jours suivants (× danger)
+    fearDecay: 0.6,                     // part de la peur qui reste chaque lendemain
+    panic: [4, 20],                     // rayon de panique (cases) : petit herbivore → grand carnivore
+    panicSat: 30,                       // satisfaction perdue par les visiteurs qui paniquent (× danger, + 8)
+    close: 0.45,                        // danger au-delà duquel le parc ferme ses portes tant que l'animal est libre
+    sense: 12,                          // un carnivore repère les visiteurs à cette distance (cases)
+    freeze: [3, 1, 2.2],                // à moins de 3 cases, les visiteurs restent figés de peur 1 à 2,2 s
+    news: [5, 4],                       // plus loin, ils réagissent après distance / 6 s (4 s au plus)
+    hesitate: 5,                        // secondes de jeu : un carnivore évadé rugit et flaire avant de chasser
+    run: { S: 2.4, M: 2.8, L: 3.4 },    // il charge à cette vitesse (× la sienne, selon sa taille)
+    reach: 0.45                         // distance d'attaque, en plus de sa demi-longueur
   },
 
   /* ---------- Combats entre mâles adultes ---------- */
@@ -269,9 +293,6 @@ DZ.CONFIG = {
     criticMax: 0.45,
     naturalSickness: 0.02,
     sickDaysToDeath: 3,
-    escapeChance: 0.15,
-    escapeRepair: 2500,
-    escapeRatingPenalty: 0.3,
     deathRatingPenalty: 0.2
   },
 

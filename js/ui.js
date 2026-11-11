@@ -394,7 +394,7 @@ window.DZ = window.DZ || {};
       else if (t.kind === 'sky') { text = t.a ? '🔭 Passerelle d\'observation : cliquez de l\'autre côté de l\'enclos' : '🔭 Passerelle d\'observation : cliquez d\'un côté de l\'enclos (à côté d\'un chemin)'; this.canvas.classList.add('tool-path'); }
       else if (t.kind === 'transfer') {
         const g = this.game, d = g.dinos.find((x) => x.id === t.dino);
-        text = d ? `🚁 Cliquez sur le nouvel enclos de ${esc(d.name)}` : '';
+        text = d ? (d.loose ? `🚁 Cliquez sur l'enclos où ramener ${esc(d.name)}` : `🚁 Cliquez sur le nouvel enclos de ${esc(d.name)}`) : '';
         this.r.highlightEnclosures = (b) => !!d && g.canTransfer(d, b).ok;
       }
       else if (t.kind === 'link' || t.kind === 'merge') {
@@ -643,11 +643,12 @@ window.DZ = window.DZ || {};
       const warn = [];
       if (c.warning) warn.push(`⚠️ ${capFirst(DZ.leSp(c.warning.predator))} risque d'attaquer ${DZ.leSp(c.warning.prey)} dans cet enclos.`);
       if (c.rivals) warn.push(`⚔️ ${c.rivals} autre${c.rivals > 1 ? 's' : ''} mâle${c.rivals > 1 ? 's' : ''} de son espèce y vi${c.rivals > 1 ? 'vent' : 't'} déjà : risque de combats.`);
-      this.confirm(`Transférer ${d.name} ?`, `Une vétérinaire va l'endormir avec une fléchette, puis un hélicoptère ${d.sex === 'F' ? 'la' : 'le'} portera dans un filet jusqu'à ${esc(DZ.bName(b))}. Coût : ${money(c.cost)}.${warn.length ? '<br><br>' + warn.join('<br>') : ''}`, 'Transférer', () => {
+      const loose = !!d.loose;
+      this.confirm(`${loose ? 'Capturer' : 'Transférer'} ${d.name} ?`, `Une vétérinaire va ${loose ? 'le rattraper et ' : ''}l'endormir avec une fléchette, puis un hélicoptère ${d.sex === 'F' ? 'la' : 'le'} portera dans un filet jusqu'à ${esc(DZ.bName(b))}${loose && b.id === d.enc ? ' (son enclos, réparé)' : ''}. Coût : ${money(c.cost)}.${warn.length ? '<br><br>' + warn.join('<br>') : ''}`, loose ? 'Capturer' : 'Transférer', () => {
         const r = g.transferDino(d.id, b.id);
         if (!r.ok) { this.error(r.reason); return; }
         this.sound.play('upgrade');
-        this.toast('🩺', `La vétérinaire part endormir ${esc(d.name)}. L'hélicoptère suivra.`, 'info');
+        this.toast('🩺', loose ? `La vétérinaire part à la poursuite de ${esc(d.name)}. L'hélicoptère suivra.` : `La vétérinaire part endormir ${esc(d.name)}. L'hélicoptère suivra.`, 'info');
         this.setTool({ kind: 'select' });
         this.select({ kind: 'dino', id: d.id });
       });
@@ -810,7 +811,8 @@ window.DZ = window.DZ || {};
         this.sound.init();
         const k = e.key.toLowerCase();
         this.keys.add(k === ' ' ? ' ' : k);
-        if (k === 'escape') { if (!$('#modal').classList.contains('hidden')) this.closeModal(); else if (this.tool.kind !== 'select') this.setTool({ kind: 'select' }); else this.select(null); }
+        if (this.game.s && this.game.s.over && k !== 'escape') return; // partie terminée : seul le bouton « Nouvelle partie »
+        if (k === 'escape') { if (this.game.s && this.game.s.over) return; if (!$('#modal').classList.contains('hidden')) this.closeModal(); else if (this.tool.kind !== 'select') this.setTool({ kind: 'select' }); else this.select(null); }
         else if (k === ' ') { e.preventDefault(); this.setSpeed(this.game.speedIndex === 0 ? (this._lastSpeed || 1) : (this._lastSpeed = this.game.speedIndex, 0)); }
         else if (k === '1') this.setSpeed(1);
         else if (k === '2') this.setSpeed(2);
@@ -1035,7 +1037,15 @@ window.DZ = window.DZ || {};
           else h += `<div class="info">🛡️ ${esc(capFirst(DZ.leSp(pi.pred)))} attaque parfois ${esc(DZ.leSp(pi.prey))}, trop grand pour lui : la proie se défend et peut le blesser.</div>`;
         }
         if (pinfo.length) h += `<div class="info small">Séparez-les : transférez l'un d'eux dans un autre enclos (sélectionnez l'animal, puis 🚁 Transférer). Une passerelle permet aux proies de fuir.</div>`;
-        if (b.level === 1 && dinos.some((d) => DZ.SPECIES[d.sp].predator && DZ.SPECIES[d.sp].size === 'L')) h += '<div class="warn">⚠️ Une simple palissade ne retiendra pas longtemps un grand prédateur. Améliorez la clôture pour éviter les évasions.</div>';
+        {
+          // risque d'évasion (au plus un par jour dans le parc)
+          let risk = 0, pred = false;
+          for (const d of dinos) { const r = g.escapeRisk(d, b); risk += r; if (r && DZ.SPECIES[d.sp].predator) pred = true; }
+          if (risk >= 0.004) {
+            const pc = Math.max(1, Math.round(Math.min(0.9, risk) * 100));
+            h += `<div class="${pred || risk > 0.05 ? 'warn' : 'info'}">${pred ? '⚠️' : '🚧'} Risque d'évasion ≈ ${pc} % par jour.${pred ? ' Un carnivore en liberté peut attaquer un visiteur : la partie serait perdue.' : ''} ${b.level < 3 ? (b.level === 1 ? 'Une clôture électrifiée le divise par cinq ; les murs de verre l\'empêchent.' : 'Les murs de verre (niveau 3) l\'empêchent.') : ''}</div>`;
+          }
+        }
         for (const rv of g.rivalryInfo(b)) {
           const sp = DZ.SPECIES[rv.sp];
           const tip = rv.exit ? 'Le vaincu peut s\'éloigner par la passerelle.' : 'Une passerelle vers un enclos voisin permettrait au vaincu de s\'éloigner ; sinon, transférez un mâle dans un autre enclos.';
@@ -1047,7 +1057,7 @@ window.DZ = window.DZ || {};
         for (const d of dinos) {
           const sp = DZ.SPECIES[d.sp];
           const hp = Math.round(d.happiness);
-          h += `<div class="dino-row" data-act="dino" data-id="${d.id}"><canvas data-thumb="${d.sp}"></canvas><div><div class="n">${esc(d.name)} <span class="sex ${d.sex}">${SEX[d.sex] || ''}</span>${d.young ? ' <span class="baby">bébé</span>' : ''} ${d.sick ? (d.injured ? '🩹' : '🤒') : ''}${d.fight ? ' ⚔️' : ''}${d.hunt ? (d.hunt.pred === d ? ' 🍖' : ' 😱') : ''}${d.cross ? ' 🌉' : ''}${d.tr ? ' 🚁' : ''}</div><div class="s">${esc(sp.short || sp.name)} · ❤ ${hp} % · ★ ${Math.round(g.dinoAttraction(d))}</div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div></div></div>`;
+          h += `<div class="dino-row" data-act="dino" data-id="${d.id}"><canvas data-thumb="${d.sp}"></canvas><div><div class="n">${esc(d.name)} <span class="sex ${d.sex}">${SEX[d.sex] || ''}</span>${d.young ? ' <span class="baby">bébé</span>' : ''} ${d.sick ? (d.injured ? '🩹' : '🤒') : ''}${d.fight ? ' ⚔️' : ''}${d.hunt ? (d.hunt.pred === d ? ' 🍖' : ' 😱') : ''}${d.cross ? ' 🌉' : ''}${d.tr ? ' 🚁' : d.loose ? ' 🚨' : ''}</div><div class="s">${esc(sp.short || sp.name)} · ❤ ${hp} % · ★ ${Math.round(g.dinoAttraction(d))}</div><div class="meter"><i class="${hp < 40 ? 'low' : hp < 65 ? 'mid' : ''}" style="width:${hp}%"></i></div></div></div>`;
         }
         for (const tr of g.transfers) {
           if (tr.to !== b.id || tr.landed) continue;
@@ -1191,7 +1201,11 @@ window.DZ = window.DZ || {};
         h += `<button class="btn wide" style="margin-bottom:6px;justify-content:space-between" data-act="dup" data-k="${k}" ${done || s.money < cost ? 'disabled' : ''}><span>${k === 'habitat' ? '🌿' : '🩺'} ${u.name} · +${Math.round(u.attraction * 100)} % attractivité</span><span class="cost">${done ? '✓' : money(cost)}</span></button>`;
       }
       h += '</div>';
-      if (d.tr) {
+      if (d.loose && !d.tr) {
+        const cost = g.transferCost(d);
+        h += `<div class="warn">🚨 ${d.sex === 'F' ? 'Elle' : 'Il'} s'est ${d.sex === 'F' ? 'échappée' : 'échappé'} et erre dans le parc !${sp.predator ? ' Ce carnivore peut attaquer un visiteur : la partie serait perdue.' : ''}</div>`;
+        h += `<button class="btn primary wide" data-act="transfer" ${s.money < cost ? 'disabled' : ''}><span>🚁 Capturer et ramener dans un enclos</span> <span class="cost">${money(cost)}</span></button>`;
+      } else if (d.tr) {
         const to = g.buildings[d.tr.to];
         h += `<div class="section"><h3>Transfert</h3><div class="info">🚁 Vers ${to ? esc(DZ.bName(to)) : '?'} · ${esc(g.transferPhaseText(d.tr) || 'terminé')}</div></div>`;
       } else {
@@ -1226,7 +1240,7 @@ window.DZ = window.DZ || {};
         if (act === 'treat') { const r = g.treatDino(d.id); if (r.ok) this.sound.play('upgrade'); else this.error(r.reason); }
         else if (act === 'transfer') {
           const n = Object.values(g.buildings).filter((o) => g.canTransfer(d, o).ok).length;
-          if (!n) { this.error('Aucun autre enclos adapté n\'a de place pour ' + d.name); return; }
+          if (!n) { this.error((d.loose ? 'Aucun enclos adapté n\'a de place pour ' : 'Aucun autre enclos adapté n\'a de place pour ') + d.name); return; }
           this.setTool({ kind: 'transfer', dino: d.id }); return;
         }
         else if (act === 'dup') { const r = g.upgradeDino(d.id, t.dataset.k); if (r.ok) { this.sound.play('upgrade'); this.r.burst(d.x * T, d.y * T - 10, 16, 'sparkle'); } else this.error(r.reason); }
@@ -1284,12 +1298,13 @@ window.DZ = window.DZ || {};
       const t = el('div', 'toast ' + (kind || 'info'));
       t.innerHTML = `<div class="i">${icon}</div><div>${text}</div><button class="x" aria-label="Fermer">✕</button>`;
       if (action) {
-        const labels = { treat: '💉 Soigner', select: '🔎 Voir', catalog: '🦖 Voir l\'espèce' };
+        const labels = { treat: '💉 Soigner', select: '🔎 Voir', catalog: '🦖 Voir l\'espèce', dino: '🔎 Voir' };
         const b = el('button', 'btn small act', labels[action.type] || 'Voir');
         b.addEventListener('click', () => {
           if (action.type === 'treat') { const r = this.game.treatDino(action.dino); if (!r.ok) this.error(r.reason || 'Impossible'); else this.sound.play('upgrade'); }
           else if (action.type === 'select') { const bb = this.game.buildings[action.building]; if (bb) { this.select({ kind: 'building', id: bb.id }); this.focus((bb.x + bb.w / 2) * T, (bb.y + bb.h / 2) * T); } }
           else if (action.type === 'catalog') { this.tab = 'dinos'; this.buildTabs(); }
+          else if (action.type === 'dino') this.showDino(action.dino);
           close();
         });
         t.appendChild(b);
@@ -1299,6 +1314,48 @@ window.DZ = window.DZ || {};
       box.appendChild(t);
       while (box.children.length > 5) box.firstChild.remove();
       setTimeout(close, kind === 'error' || kind === 'music' ? 3000 : kind === 'bad' ? 11000 : 7000);
+    }
+
+    /* Sélectionne un dinosaure et centre la vue dessus. */
+    showDino(id) {
+      const d = this.game.dinos.find((x) => x.id === id);
+      if (!d) return;
+      this.select({ kind: 'dino', id: d.id });
+      this.focus(d.x * T, d.y * T);
+    }
+    /* Bandeau d'alerte tant qu'un dinosaure est en liberté. */
+    updateAlert() {
+      const g = this.game, loose = g.looseDinos();
+      let a = this._alert;
+      if (!a) {
+        a = this._alert = el('button', 'glass hidden', '');
+        a.id = 'alert';
+        a.addEventListener('click', () => { const l = this.game.looseDinos(); if (l.length) { const d = l[(this._alertI = ((this._alertI || 0) + 1) % l.length)]; this.showDino(d.id); } });
+        $('#app').appendChild(a);
+      }
+      const key = loose.map((d) => d.id + (d.tr ? d.tr.phase : '')).join(',') + g.looseOpenFactor();
+      if (key === this._alertKey) return;
+      this._alertKey = key;
+      a.classList.toggle('hidden', !loose.length);
+      if (!loose.length) return;
+      const d = loose[0], sp = DZ.SPECIES[d.sp], more = loose.length > 1 ? ` (+${loose.length - 1})` : '';
+      const closed = g.looseOpenFactor() <= 0;
+      const what = d.tr ? g.transferPhaseText(d.tr) : `envoyez la vétérinaire${sp.predator ? ' au plus vite' : ''}`;
+      a.innerHTML = `<b>🚨 ${esc(d.name)} (${esc(sp.short || sp.name)}) en liberté${more}</b><span>${esc(what)}${closed ? ' · parc fermé' : ''}</span>`;
+    }
+    /* Fin de partie : un carnivore évadé a attaqué un visiteur. */
+    showGameOver() {
+      const g = this.game, o = g.s.over;
+      if (!o) return;
+      g.setSpeed(0); this.refreshSpeed();
+      this.modal(`<h2>🦖 Partie terminée</h2><p>${esc(o.text)}</p>
+        <div class="rows"><span class="k">Jour atteint</span><span class="v">${o.day}</span><span class="k">Gains depuis l'ouverture</span><span class="v">${money(o.earned)}</span></div>
+        <p class="info small">Pour éviter les évasions : clôtures électrifiées ou murs de verre pour les carnivores, animaux heureux. Si un dinosaure s'échappe, sélectionnez-le tout de suite et envoyez la vétérinaire.</p>
+        <div class="btns"><button class="btn primary" data-over>🔄 Nouvelle partie</button></div>`, (card) => {
+        card.querySelector('[data-over]').addEventListener('click', () => { this.closeModal(); if (this.onReset) this.onReset(); });
+      });
+      $('#modal').onclick = null; // pas de fermeture en cliquant à côté
+      this.sound.play('alarm');
     }
 
     error(reason) { this.toast('✋', esc(reason || 'Action impossible'), 'error'); this.sound.play('error'); }
@@ -1321,6 +1378,7 @@ window.DZ = window.DZ || {};
           <span class="k total">Bénéfice du jour</span><span class="v total ${sm.net >= 0 ? 'pos' : 'neg'}">${sign(sm.net)}</span>
           ${line('Note du parc', sm.rating.toFixed(2) + ' ★ ' + (Math.abs(d) >= 0.01 ? `<span class="${d > 0 ? 'pos' : 'neg'}">(${d > 0 ? '+' : ''}${d.toFixed(2)})</span>` : ''))}
           ${sm.construction || sm.dinos ? line('Investissements', money(-(sm.construction + sm.dinos))) : ''}
+          ${this.game.s.fear > 0.02 ? line('😨 Peur après une évasion', `−${Math.round(this.game.s.fear * 100)} % de visiteurs demain`, 'neg') : ''}
         </div><div class="bar"><i></i></div>`;
       box.classList.remove('hidden');
       const bar = box.querySelector('.bar i');
@@ -1403,7 +1461,8 @@ window.DZ = window.DZ || {};
       this.modal(`<h2>Aide</h2>
         <p>Construisez des <b>chemins</b> depuis l'entrée, des <b>enclos</b> reliés aux chemins, puis installez-y des <b>dinosaures</b>. Les visiteurs paient un billet, se promènent, regardent les enclos et dépensent dans les boutiques et restaurants. Gagnez un maximum d'argent pour agrandir le parc !</p>
         <p>Ajoutez des <b>toilettes</b>, des <b>restaurants</b> et des <b>poubelles</b> pour garder des visiteurs satisfaits. La <b>note du parc</b> dépend de leur satisfaction, de la propreté, de la diversité des espèces, de la qualité des enclos et du bien-être des animaux. Elle débloque de nouvelles espèces.</p>
-        <p>⚠️ Les <b>carnivores</b> ne cohabitent qu'avec leur propre espèce : ils chassent les autres (les petites espèces et les bébés surtout ; les grandes se défendent) et se battent avec les autres prédateurs. Les grands prédateurs peuvent s'évader d'une simple palissade.</p>
+        <p>⚠️ Les <b>carnivores</b> ne cohabitent qu'avec leur propre espèce : ils chassent les autres (les petites espèces et les bébés surtout ; les grandes se défendent) et se battent avec les autres prédateurs.</p>
+        <p>🚨 Derrière une clôture trop faible, un dinosaure peut <b>s'évader</b> (surtout les carnivores ; les murs de verre du niveau 3 tiennent toujours). Les visiteurs paniquent, la note baisse et la peur éloigne les visiteurs pendant quelques jours. <b>Si un carnivore évadé attaque un visiteur, la partie est perdue.</b> Cliquez sur le bandeau rouge, puis <b>Capturer</b> : la vétérinaire le rattrape et l'endort, l'hélicoptère le ramène dans l'enclos choisi.</p>
         <p>🌉 Une <b>passerelle</b> relie deux enclos terrestres face à face (onglet Enclos, ou panneau de l'enclos) : les dinosaures passent de l'un à l'autre, au-dessus des allées. 🔗 Deux enclos terrestres qui se touchent peuvent être <b>réunis</b> en un seul. ⚔️ Deux <b>mâles adultes</b> d'une même espèce finissent par se battre, surtout chez les espèces territoriales : le vaincu peut être blessé ; une passerelle lui permet de s'éloigner.</p>
         <p>🔭 Une <b>passerelle d'observation</b> (onglet Chemins) fait passer les visiteurs au-dessus d'un enclos : la meilleure vue sur les dinosaures. 🛝 Les <b>aires de jeux</b> (onglet Services) amusent les enfants et rendent les familles plus heureuses. 🚁 Pour changer un dinosaure d'enclos, sélectionnez-le puis <b>Transférer</b> : une vétérinaire l'endort et un hélicoptère le dépose dans son nouvel enclos.</p>
         <div class="keys">
@@ -1433,7 +1492,10 @@ window.DZ = window.DZ || {};
       });
       g.on('splash', (d) => this.sound.play('splash', { pos: this.pos3(d.x, d.y, 0) }));
       g.on('thunder', () => this.sound.play('thunder'));
-      g.on('escape', () => { this.sound.play('alarm'); if (this.sound.music) this.sound.music.alert(); });
+      g.on('escape', (e) => { this.sound.play('alarm'); if (this.sound.music && e.danger >= 0.3) this.sound.music.alert(); this.sound.crowdReact('peur'); });
+      g.on('panic', () => { if (!this._panicSnd || performance.now() - this._panicSnd > 4000) { this._panicSnd = performance.now(); this.sound.crowdReact('peur'); } });
+      g.on('attack', (e) => { this.sound.dino(e.dino.sp, this.pos3(e.x, e.y, 0.9), true); this.focus(e.x * T, e.y * T); });
+      g.on('gameOver', () => { DZ.Save.save(g); setTimeout(() => this.showGameOver(), 1800); });
       g.on('watched', (e) => { if (e.gain > 16 && Math.random() < 0.25) this.sound.crowdReact('ooh'); });
       g.on('dinoAdded', (d) => { if (C.dinos[d.sp].attraction >= 80 && this.sound.music) this.sound.music.wonder(); });
       g.on('reset', () => { this.moneyShown = g.s.money; this.select(null); this.buildItems(); this.mmBase = null; this.mmDirty = true; this.refreshPlayer(); });
@@ -1450,6 +1512,7 @@ window.DZ = window.DZ || {};
 
     update(dt) {
       this.updateKeys(dt);
+      this.updateAlert();
       if (this.compass && this.r.project) {
         const c = this.r.cam, a = this.r.project(c.tx, c.ty, c.tz), b = this.r.project(c.tx, c.ty, c.tz - 4);
         if (a && b) this.compass.style.transform = `rotate(${Math.atan2(b.x - a.x, a.y - b.y)}rad)`;
@@ -1548,6 +1611,8 @@ window.DZ = window.DZ || {};
     // dinosaures
     x.fillStyle = '#ffffff';
     for (const d of g.dinos) x.fillRect(d.x * sx - 1, d.y * sy - 1, 2.5, 2.5);
+    // dinosaures en liberté
+    for (const d of g.dinos) if (d.loose) { x.fillStyle = '#ff4a36'; x.beginPath(); x.arc(d.x * sx, d.y * sy, 4 + Math.sin(performance.now() / 150) * 1.2, 0, U.TAU); x.fill(); x.fillStyle = '#ffffff'; }
     // vue actuelle
     const v = this.r.view;
     if (v) {
