@@ -537,7 +537,7 @@
         const hd = M4.copy(root); M4.translate(hd, rig.bl * 0.45, 0, 0); M4.rotY(hd, Math.sin(t * 0.8 + d.id) * 0.25); out.push([rig.head, hd]);
         const w1 = M4.copy(root); M4.rotX(w1, -flap); out.push([rig.wing, w1]);
         const w2 = M4.copy(root); M4.scale(w2, 1, 1, -1); M4.rotX(w2, -flap); out.push([rig.wing, w2]);
-        this.skinSwap(d, out, skinStart0);
+        this.skelSwap(d, out, skinStart0, root, { kind: 'air', phase: d.phase || 0, t, seed: d.id * 1.7, look: Math.sin(t * 0.8 + d.id) * 0.25 });
         return { x, y: gy + alt, z, r: rig.span * 0.6, h: 0.2, shadowY: gy };
       }
       if (sp.habitat === 'water') {
@@ -566,7 +566,7 @@
             M4.translate(m, -rig.segs[i].len, 0, 0);
           }
         }
-        this.skinSwap(d, out, skinStart0);
+        this.skelSwap(d, out, skinStart0, root, { kind: 'water', phase: ph, surf: d.surf || 0, seed: d.id * 1.3 });
         return { x, y, z, r: rig.len * 0.5, h: 0.1, underwater: !lift, lifted: lift };
       }
       // --- terrestres ---
@@ -577,11 +577,15 @@
       if (lift) gy += (hangTop - rig.height * kAge - gy) * lift;
       const bob = moving ? -Math.abs(Math.sin(phase)) * (rig.quad ? 0.012 : 0.03) : Math.sin(seedT * 1.7) * 0.004;
       M4.translate(root, x, gy, z); M4.rotY(root, -st.heading); if (kAge < 1) M4.scale(root, kAge, kAge, kAge);
+      // hanches : hauteur (pas, repos, sommeil) et rotations, partagées avec le modèle à squelette
+      const hipDy = bob - (rest ? rig.hipH * 0.2 : 0) - sleep * rig.hipH * 0.32 * (1 - lift);
+      const hipRot = M4.create();
+      if (moving) M4.rotZ(hipRot, Math.sin(phase * 2) * 0.012);
+      if (sleep > 0) { M4.rotX(hipRot, sleep * 0.32 * (1 - lift) + (d.tr && d.tr.phase === 'drowsy' ? Math.sin(d.t * 5) * 0.08 * (1 - sleep) : 0)); }
+      if (state === 'fight') { const k = d.fightK || 0; M4.rotZ(hipRot, (sp.fight === 'butt' ? -0.1 : 0.06) * k); if (sp.fight === 'tail') M4.rotY(hipRot, Math.sin(d.anim * 4) * 0.35); }
       const hip = M4.copy(root);
-      M4.translate(hip, 0, rig.hipH + bob - (rest ? rig.hipH * 0.2 : 0) - sleep * rig.hipH * 0.32 * (1 - lift), 0);
-      if (moving) M4.rotZ(hip, Math.sin(phase * 2) * 0.012);
-      if (sleep > 0) { M4.rotX(hip, sleep * 0.32 * (1 - lift) + (d.tr && d.tr.phase === 'drowsy' ? Math.sin(d.t * 5) * 0.08 * (1 - sleep) : 0)); }
-      if (state === 'fight') { const k = d.fightK || 0; M4.rotZ(hip, (sp.fight === 'butt' ? -0.1 : 0.06) * k); if (sp.fight === 'tail') M4.rotY(hip, Math.sin(d.anim * 4) * 0.35); }
+      M4.translate(hip, 0, rig.hipH + hipDy, 0);
+      M4.mul(hip, hipRot, hip);
       const body = M4.copy(hip); M4.scale(body, 1, 1 + Math.sin(seedT * 1.7) * 0.012, 1 + Math.sin(seedT * 1.7) * 0.008);
       const skinStart = out.length;
       out.push([rig.body, body]);
@@ -642,7 +646,13 @@
         out.push([rig.arm.mesh, am]);
       }
       if (state === 'roar' && d.anim < 0.3 && C.dinos[d.sp].space >= 5 && Math.random() < 0.3) this.burst3(x, z, 0.3, 'dust');
-      this.skinSwap(d, out, skinStart);
+      const eatMult = state === 'eat' && d.sp !== 'brachiosaurus' ? 1.5 : 0.4;
+      this.skelSwap(d, out, skinStart, root, {
+        kind: 'land', hipDy: hipDy / rig.hipH, hipRot, breathe: Math.sin(seedT * 1.7), moving, phase, seedT, rest, state,
+        na: na - rig.neckAng, hr: hr - rig.headRel, look, jaw, roarK: state === 'roar' ? Math.sin(Math.min(1, d.anim / 1.8) * Math.PI) : 0,
+        neckStep: rig.neck.length > 1 ? Math.sign(rig.headRel) * 0.06 * (eatMult - 0.4) * (rig.neck.length - 1) : 0,
+        procNeck: rig.neck.length, procTail: rig.tail.length
+      });
       return { x, y: gy, z, r: rig.len * 0.5 * kAge, h: rig.height * kAge, head: headPos, lifted: lift };
     }
 
@@ -1682,8 +1692,8 @@
       const air = sp.habitat === 'air', water = sp.habitat === 'water';
       // boîte englobante réelle de la pose
       let x0 = 1e9, y0 = 1e9, z0 = 1e9, x1 = -1e9, y1 = -1e9, z1 = -1e9;
-      for (const [mesh, mat] of parts) {
-        const b = mesh.bounds;
+      for (const [mesh, mat0, bones] of parts) {
+        const b = mesh.bounds, mat = bones ? bones.subarray(0, 16) : mat0; // modèle à squelette : repère de l'os du corps
         for (const cx of [b.x0, b.x1]) for (const cy2 of [b.y0, b.y1]) for (const cz of [b.z0, b.z1]) {
           const p = M4.apply(mat, cx, cy2, cz);
           x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]);

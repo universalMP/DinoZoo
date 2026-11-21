@@ -37,10 +37,11 @@ window.DZ = window.DZ || {};
   const ROCK_R = { S: 0.14, M: 0.27, L: 0.45 };
   const TREE_R = { araucaria: 0.13, palmier: 0.11, ginkgo: 0.13, arbremort: 0.09, cycas: 0.2, buisson: 0.26, fougere: 0.18 };
   /* Hauteur des espèces (3D, en cases), pour le passage sous les passerelles. */
+  // hauteur des modèles réalistes (voile, plaques et crêtes comprises) ; cou levé ou au repas pour les sauropodes
   DZ.DINO_HEIGHT = {
-    compsognathus: 0.34, dryosaurus: 0.62, psittacosaurus: 0.49, pachycephalosaurus: 1, parasaurolophus: 1, triceratops: 1.23,
-    stegosaurus: 1.61, ankylosaurus: 1.1, diplodocus: 2.22, brachiosaurus: 2.07, velociraptor: 0.67, dilophosaurus: 0.8,
-    allosaurus: 1.38, carnotaurus: 1.31, spinosaurus: 1.09, trex: 1.69
+    compsognathus: 0.41, dryosaurus: 0.62, psittacosaurus: 0.49, pachycephalosaurus: 1, parasaurolophus: 1.18, triceratops: 1.37,
+    stegosaurus: 1.61, ankylosaurus: 1.1, diplodocus: 2.22, brachiosaurus: 2.07, velociraptor: 0.67, dilophosaurus: 0.94,
+    allosaurus: 1.38, carnotaurus: 1.31, spinosaurus: 1.46, trex: 1.69
   };
   const DECK_CLEAR = () => C.skywalk.height - 0.4; // dessous du tablier et de ses poutres
 

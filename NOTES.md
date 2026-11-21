@@ -7,31 +7,41 @@ Décisions prises pendant le développement, là où la demande était ambiguë 
 - Pour un rendu plus réaliste, chaque espèce et les visiteurs ont un vrai modèle 3D texturé, généré avec Meshy :
   - les 20 espèces ;
   - 6 silhouettes de visiteurs : homme, femme, senior, jeune femme, garçon, fille.
-- Les reptiles marins ont demandé plus d'essais :
-  - Mosasaure : réussi au deuxième essai, avec une description qui insiste sur un corps de requin, des nageoires et l'absence de pattes.
-  - Plésiosaure : à partir d'une description, Meshy lui donnait toujours des pattes. Il a fallu générer d'abord une image de référence de profil (text-to-image), puis le modèle 3D à partir de cette image (image-to-3d). C'est la méthode à retenir quand la description seule échoue.
+- **Deuxième génération des dinosaures** (21 novembre 2026) : la première série, générée à partir de descriptions seules, comportait des erreurs (Diplodocus bipède, Pachycéphalosaure avec une voile, Ankylosaure aux plaques de stégosaure, Plésiosaure sans cou…).
+  - Pour chaque espèce : la description Wikipedia et 7 à 14 reconstitutions de Wikimedia Commons, résumées dans `docs/references-dinos.md` avec l'invite retenue.
+  - Méthode : une image de concept (Meshy text-to-image, nano-banana-2, 6 crédits), vérifiée par rapport aux références, puis le modèle 3D à partir de cette image (image-to-3d, meshy-7.1, textures 2K, 30 crédits), d'environ 20 000 triangles.
+  - 4 images refaites : les deux crêtes du Dilophosaure, la queue en pagaie du Spinosaure, et des vues de dessus symétriques pour les deux ptérosaures. Coût total : 744 crédits.
+  - Les vues de dessus déroutent l'orientation automatique : Meshy a pris celle du Ptéranodon pour une vue de face (corrigée par `--roll 90`). Le Quetzalcoatlus, aux ailes en flèche, a pour grand axe son corps et non son envergure.
 - Le jeu doit tourner depuis file:// sans bibliothèque. Chaque .glb est donc converti en script par `tools/glb2js.mjs` :
   - positions et UV sur 16 bits, normales sur 8 bits ;
-  - textures JPEG de 1024 px pour les dinosaures et de 512 px pour les visiteurs.
+  - textures JPEG de 1536 px pour les dinosaures et de 512 px pour les visiteurs ;
+  - `--yaw auto` tourne le grand axe du modèle vers X, tête vers +X. La tête est l'extrémité la plus haute ; `--head low`, `--flip`, `--axis minor`, `--pitch` et `--roll` corrigent les cas où ce n'est pas vrai.
 - Le convertisseur met aussi à jour `js/models/index.js`, la liste des modèles disponibles. Les .glb bruts restent dans `meshy_output/`, qui n'est pas versionné.
-- **Chargement progressif** : les modèles (environ 14 Mo au total) ne sont pas dans la page.
+- **Chargement progressif** : les modèles (environ 34 Mo au total) ne sont pas dans la page.
   - Après le démarrage, un script par modèle est ajouté à la page, trois à la fois : visiteurs d'abord, puis espèces présentes dans le parc, puis les autres.
   - Tant qu'un modèle n'est pas prêt, le pantin ou le visiteur procédural s'affiche.
   - Les vignettes de la boutique sont redessinées quand le modèle arrive.
-- **Dinosaures** (`js/r3d/skin3d.js`) : Meshy n'anime que les humanoïdes, donc le modèle est attaché au pantin procédural déjà animé.
-  - Chaque pièce du pantin devient un os.
-  - Le modèle est ajusté sur la silhouette du pantin au repos. La hauteur peut varier de −15 % à +25 % par rapport à la longueur, pour ne pas écraser un modèle.
-  - Volants : ajustement sans déformation, sur la longueur et l'envergure.
-  - Chaque sommet suit les 4 pièces les plus proches, avec des poids lissés.
-  - Toutes les animations existantes s'appliquent : marche, repos, repas, cri, combat, vol, transport, bébés.
-- **Visiteurs** : un modèle par silhouette, dessiné en lot (instances).
+- **Dinosaures : squelette ajusté au modèle** (`js/r3d/rigfit.js`, `js/r3d/skel3d.js`). Meshy n'anime que les humanoïdes. Plaquer le modèle sur le pantin procédural déformait le modèle, et ses pattes ou sa tête suivaient souvent le mauvais os. Chaque modèle reçoit donc son propre squelette, calculé au chargement en 50 à 100 ms :
+  - Pieds : les sommets les plus bas, séparés en gauche et droite (et en avant et arrière chez les quadrupèdes).
+  - Pattes : la ligne de chaque patte est tracée de bas en haut, pour placer hanche, genou et cheville.
+  - Bras : sommets sous la poitrine ou hors du torse, devant les cuisses ; la main est le point le plus éloigné de l'épaule.
+  - Cou et queue : ligne centrale suivie en 3D (cous et queues qui se recourbent sur le côté), 1 à 7 os chacun.
+  - Tête : articulation là où le cou, après son point le plus fin, s'épaissit vers le crâne. La longueur est fixée pour le Tricératops et le Stégosaure. La collerette et la crête tubulaire suivent la tête.
+  - Mâchoire : sous la ligne de la bouche, en avant de la charnière.
+  - Volants : ailes en trois segments (bras, avant-bras, doigt). Marins : quatre nageoires en deux segments, mâchoire, queue jusqu'à la nageoire caudale.
+  - Poids : fondu large le long du dos, du cou et de la queue (pas de pli quand le cou s'abaisse), puis membres, puis mâchoire.
+  - Le parasaurolophe a un modèle quadrupède alors que son pantin est bipède : il marche à quatre pattes.
+  - L'animation reprend les angles du pantin (marche, repos, sommeil, repas, cri, combat, transport, bébés) et les applique à chaque os autour de son articulation. Elle ajoute les coudes, les ailes ou les bras écartés pendant le cri, le battement d'ailes en vague, la nage à quatre nageoires et l'ouverture de la mâchoire des marins.
+  - `tools/rigview.html?ids=trex,diplodocus` affiche les squelettes pour vérifier un nouveau modèle.
+- - **Visiteurs** : un modèle par silhouette, dessiné en lot (instances).
   - Le shader plie les jambes à la hanche (46 % de la taille, 43 % chez l'enfant) et balance les bras à l'épaule.
   - Il ramène aussi les bras le long du corps : le modèle est en pose A.
   - Chaque visiteur reçoit une légère variation de teinte, puisque les vêtements de la texture sont fixes.
   - Aires de jeux : assis, escalade et balançoire utilisent les mêmes angles.
 - Pour ajouter ou remplacer un modèle :
-  1. générer le .glb : Meshy text-to-3d, environ 6 000 triangles pour un dinosaure, 2 000 pour un visiteur (pose A), texture 2k ;
-  2. lancer `node tools/glb2js.mjs --id <id> --in <fichier.glb>`. Ajouter `--yaw 0 --tex 512` pour un visiteur, et `--yaw` si la tête d'un dinosaure n'est pas tournée vers +X.
+  1. générer le .glb. Pour un dinosaure : image de concept vérifiée, puis image-to-3d (environ 20 000 triangles, texture 2k). Pour un visiteur : text-to-3d, environ 2 000 triangles, pose A ;
+  2. lancer `node tools/glb2js.mjs --id <id> --in <fichier.glb> --yaw auto`. Ajouter `--yaw 0 --tex 512` pour un visiteur ;
+  3. vérifier le squelette avec `tools/rigview.html?id=<id>`, puis les vignettes du jeu.
 
 ## Décor réaliste et collisions
 

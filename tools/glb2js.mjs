@@ -6,7 +6,7 @@
    16 bits, normales sur 8 bits) avec sa texture réduite en JPEG.
 
    node tools/glb2js.mjs --id compsognathus --in meshy_output/compy.glb \
-        [--yaw 90] [--tex 1024] [--quality 80]
+        [--yaw 90|auto] [--pitch 90] [--roll 180] [--axis minor] [--head high|low] [--flip] [--tex 1536] [--quality 80]
 
    --yaw : rotation (degrés, autour de la verticale) qui tourne la tête du
            modèle vers +X (le glTF regarde vers +Z : 90 par défaut).
@@ -17,10 +17,10 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 
-const args = Object.fromEntries(process.argv.slice(2).reduce((a, v, i, all) => (v.startsWith('--') ? a.concat([[v.slice(2), all[i + 1]]]) : a), []));
+const args = Object.fromEntries(process.argv.slice(2).reduce((a, v, i, all) => (v.startsWith('--') ? a.concat([[v.slice(2), all[i + 1] && !all[i + 1].startsWith('--') ? all[i + 1] : true]]) : a), []));
 if (!args.id || !args.in) { console.error('usage: --id <espèce> --in <fichier.glb> [--yaw 90] [--tex 1024] [--quality 80]'); process.exit(2); }
-const yaw = (args.yaw == null ? 90 : +args.yaw) * Math.PI / 180;
-const texSize = +(args.tex || 1024), quality = +(args.quality || 80);
+let yaw = (args.yaw == null || args.yaw === 'auto' ? 90 : +args.yaw) * Math.PI / 180;
+const texSize = +(args.tex || 1536), quality = +(args.quality || 80);
 const outFile = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'js', 'models', args.id + '.js');
 
 /* ---------- lecture du GLB ---------- */
@@ -88,7 +88,33 @@ function visit(ni, parent) {
 const scene = json.scenes[json.scene || 0];
 for (const ni of scene.nodes) visit(ni, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
-/* ---------- orientation : tête vers +X, pieds à y = 0, centré ---------- */
+/* ---------- orientation : tête vers +X, pieds à y = 0, centré ----------
+   --yaw auto : le grand axe horizontal (analyse en composantes principales)
+   devient l'axe X ; la tête est l'extrémité la plus haute (animaux
+   terrestres), ou celle indiquée par --head low|high. --flip inverse. */
+// --pitch 90 : le modèle est « debout » (vue de dessus prise pour une vue de face) — le haut devient l'avant.
+// --roll 180 : retourne le modèle (dos en haut).
+if (args.pitch) { const a = +args.pitch * Math.PI / 180, c = Math.cos(a), s = Math.sin(a); for (let k = 0; k < P.length; k += 3) for (const A of [P, N]) { const x = A[k], y = A[k + 1]; A[k] = x * c + y * s; A[k + 1] = -x * s + y * c; } }
+if (args.roll) { const a = +args.roll * Math.PI / 180, c = Math.cos(a), s = Math.sin(a); for (let k = 0; k < P.length; k += 3) for (const A of [P, N]) { const y = A[k + 1], z = A[k + 2]; A[k + 1] = y * c - z * s; A[k + 2] = y * s + z * c; } }
+if (args.yaw === 'auto') {
+  let mx = 0, mz = 0; const nv0 = P.length / 3;
+  for (let k = 0; k < P.length; k += 3) { mx += P[k]; mz += P[k + 2]; }
+  mx /= nv0; mz /= nv0;
+  let cxx = 0, czz = 0, cxz = 0;
+  for (let k = 0; k < P.length; k += 3) { const x = P[k] - mx, z = P[k + 2] - mz; cxx += x * x; czz += z * z; cxz += x * z; }
+  yaw = -0.5 * Math.atan2(2 * cxz, cxx - czz); // amène le grand axe sur X
+  if (args.axis === 'minor') yaw += Math.PI / 2; // volants : l'envergure est le grand axe, le corps le petit
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  let x0 = 1e9, x1 = -1e9;
+  for (let k = 0; k < P.length; k += 3) { const x = P[k] * c + P[k + 2] * s; x0 = Math.min(x0, x); x1 = Math.max(x1, x); }
+  // hauteur maximale de chaque extrémité (15 % de la longueur)
+  let hiF = -1e9, hiB = -1e9, nF = 0, nB = 0;
+  for (let k = 0; k < P.length; k += 3) { const x = P[k] * c + P[k + 2] * s; if (x > x1 - (x1 - x0) * 0.15) { hiF = Math.max(hiF, P[k + 1]); nF++; } if (x < x0 + (x1 - x0) * 0.15) { hiB = Math.max(hiB, P[k + 1]); nB++; } }
+  let headFront = args.head === 'low' ? hiF < hiB : hiF >= hiB;
+  if (args.flip) headFront = !headFront;
+  if (!headFront) yaw += Math.PI;
+  console.log(`orientation : ${(yaw * 180 / Math.PI).toFixed(1)}°, extrémité avant ${hiF.toFixed(3)} (${nF}) / arrière ${hiB.toFixed(3)} (${nB})`);
+}
 const cy = Math.cos(yaw), sy = Math.sin(yaw);
 for (let k = 0; k < P.length; k += 3) {
   const x = P[k], z = P[k + 2]; P[k] = x * cy + z * sy; P[k + 2] = -x * sy + z * cy;

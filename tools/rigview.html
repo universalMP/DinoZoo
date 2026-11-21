@@ -1,0 +1,53 @@
+<!doctype html>
+<!-- DinoZoo — contrôle des squelettes ajustés aux modèles 3D (js/r3d/rigfit.js).
+     Ouvrir via un serveur local :
+       tools/rigview.html?id=trex            profil et dessus d'une espèce
+       tools/rigview.html?ids=trex,diplodocus  profils de plusieurs espèces
+     Chaque sommet prend la couleur de son os principal ; les os sont tracés en noir. -->
+<meta charset="utf-8">
+<title>Squelettes DinoZoo</title>
+<style>body{margin:0;font:11px sans-serif;background:#f4f1ea}#g{display:grid;gap:3px}figure{margin:0;position:relative}canvas{display:block;background:#fff;width:100%}figcaption{position:absolute;left:4px;top:2px}</style>
+<div id="g"></div>
+<script>document.write('<script src="../js/r3d/rigfit.js?v=' + Date.now() + '"><\/script>');</script>
+<script>
+const qs = new URLSearchParams(location.search);
+const many = qs.get('ids'), ids = (many || qs.get('id') || 'trex').split(',');
+const PLAN = { triceratops: 'quad', stegosaurus: 'quad', ankylosaurus: 'quad', diplodocus: 'quad', brachiosaurus: 'quad', parasaurolophus: 'quad', pteranodon: 'ptero', quetzalcoatlus: 'ptero', plesiosaurus: 'plesio', mosasaurus: 'mosa' };
+const g = document.getElementById('g');
+g.style.gridTemplateColumns = many ? '1fr 1fr' : '1fr';
+const dec = (b64, C) => { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new C(u.buffer); };
+const col = (b) => `hsl(${(b * 137.5) % 360},70%,${45 + (b % 3) * 8}%)`;
+function view(id, M, P, rig, ax, w, h, label) {
+  const f = document.createElement('figure'), cv = document.createElement('canvas');
+  cv.width = w; cv.height = h; f.appendChild(cv);
+  const c = document.createElement('figcaption'); c.textContent = label; f.appendChild(c); g.appendChild(f);
+  const x = cv.getContext('2d'), n = M.n;
+  const x0 = M.lo[0], x1 = M.hi[0], y0 = ax === 1 ? 0 : M.lo[2], y1 = ax === 1 ? M.hi[1] : M.hi[2];
+  const sc = Math.min((w - 16) / (x1 - x0), (h - 16) / (y1 - y0));
+  const X = (v) => 8 + (v - x0) * sc, Y = (v) => h - 8 - (v - y0) * sc;
+  const J = rig.weights.J, Wt = rig.weights.W;
+  for (let k = 0; k < n; k++) { x.fillStyle = col(J[k * 4]); x.globalAlpha = 0.2 + Wt[k * 4] * 0.5; x.fillRect(X(P[k * 3]), Y(P[k * 3 + ax]), 1.5, 1.5); }
+  x.globalAlpha = 1; x.lineWidth = many ? 1.2 : 2;
+  for (const [i, b] of rig.bones.entries()) {
+    x.strokeStyle = '#000'; x.beginPath(); x.moveTo(X(b.pivot[0]), Y(b.pivot[ax])); x.lineTo(X(b.end[0]), Y(b.end[ax])); x.stroke();
+    x.fillStyle = col(i); x.beginPath(); x.arc(X(b.pivot[0]), Y(b.pivot[ax]), many ? 2.5 : 4, 0, 7); x.fill(); x.stroke();
+  }
+}
+let left = ids.length;
+for (const id of ids) {
+  const s = document.createElement('script');
+  s.src = '../js/models/' + id + '.js?v=' + Date.now();
+  s.onload = () => {
+    const M = DZ.MODELS[id], q = dec(M.pos, Uint16Array), n = M.n, P = new Float32Array(n * 3);
+    for (let k = 0; k < n; k++) { P[k * 3] = M.lo[0] + q[k * 3] / 65535 * (M.hi[0] - M.lo[0]); P[k * 3 + 1] = q[k * 3 + 1] / 65535 * M.hi[1]; P[k * 3 + 2] = M.lo[2] + q[k * 3 + 2] / 65535 * (M.hi[2] - M.lo[2]); }
+    const t0 = performance.now(), rig = DZ.rigfit(id, P, PLAN[id] || 'biped'), ms = performance.now() - t0;
+    (window.RIGS = window.RIGS || {})[id] = rig;
+    const label = `${id} — ${rig.kind}, ${rig.bones.length} os, ${n} sommets, ${ms.toFixed(0)} ms`;
+    const top = rig.kind === 'ptero' || rig.kind === 'plesio';
+    if (many) view(id, M, P, rig, top ? 2 : 1, 400, 220, label);
+    else { view(id, M, P, rig, 1, 760, 400, label); view(id, M, P, rig, 2, 760, 300, 'dessus'); }
+    if (!--left) document.body.dataset.done = 1;
+  };
+  document.head.appendChild(s);
+}
+</script>

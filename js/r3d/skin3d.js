@@ -1,14 +1,8 @@
 /* =====================================================================
-   DinoZoo 3D — Modèles réalistes (générés avec Meshy) sur le squelette
-   des dinosaures procéduraux.
-
-   Le pantin procédural (r3d/dino3d.js) reste la référence : il fournit,
-   à chaque image, une matrice par pièce (corps, queue, cou, tête,
-   mâchoire, cuisses, jambes, pieds, bras). Un modèle de DZ.MODELS est
-   ajusté une fois sur la pose de repos du pantin ; chaque sommet est
-   attaché aux pièces les plus proches (jusqu'à 4, poids lissés). Ensuite
-   chaque pièce devient un os : le modèle suit toutes les animations
-   existantes (marche, repos, repas, cri, combat, transport…).
+   DinoZoo 3D — Modèles réalistes (générés avec Meshy) : outils communs,
+   visiteurs, plantes et chargement progressif.
+   Les dinosaures ont leur propre squelette : voir r3d/rigfit.js
+   (ajustement) et r3d/skel3d.js (animation).
    ===================================================================== */
 (function () {
   const G = DZ.G, M4 = G.m4;
@@ -20,7 +14,8 @@
     return new Ctor(u8.buffer);
   };
 
-  /* Pose de repos du pantin : liste [maillage, matrice], tête droite. */
+  /* Pose de repos du pantin procédural : liste [maillage, matrice]. Sert à
+     donner au modèle réaliste la même taille que le pantin. */
   R.bindPose = function (id) {
     const fake = { id: -98, sp: id, x: 0, y: 0, face: 1, phase: 0, moving: 0, state: 'idle', anim: 0, heading: 0, gx: 1, gy: 0, alt: 18, surf: 0.6 };
     const parts = [];
@@ -31,113 +26,6 @@
     try { this.dinoPose(fake, 98 * 3.1, parts, 0); } // seedT = 0 : aucune oscillation
     finally { this._binding = false; this.world.heightAt = saveH; this.dinoState.delete(-98); }
     return parts;
-  };
-
-  R.skinModel = function (id) {
-    this.skinCache = this.skinCache || new Map();
-    if (this.skinCache.has(id)) return this.skinCache.get(id);
-    if (this.noModels) return null;
-    const M = DZ.MODELS && DZ.MODELS[id];
-    if (!M) { this.requestModel(id); return null; } // pas encore chargé
-    let res = null;
-    if (DZ.SPECIES[id]) {
-      try { res = this.buildSkin(id, M); } catch (e) { console.warn('Modèle 3D ' + id + ' ignoré :', e); res = null; }
-    }
-    this.skinCache.set(id, res);
-    return res;
-  };
-
-  R.buildSkin = function (id, M) {
-    const gl = this.gl;
-    const parts = this.bindPose(id);
-    const nb = parts.length;
-    if (nb > G.MAX_BONES) throw new Error(nb + ' os, maximum ' + G.MAX_BONES);
-    // points d'échantillon de chaque pièce, en pose de repos
-    const samples = [];
-    let px0 = 1e9, py0 = 1e9, pz0 = 1e9, px1 = -1e9, py1 = -1e9, pz1 = -1e9;
-    for (const [mesh, mat] of parts) {
-      const v = mesh.raw;
-      if (!v) throw new Error('pièce sans sommets');
-      const n = v.length / 10, step = Math.max(1, Math.floor(n / 220));
-      const pts = [];
-      for (let k = 0; k < n; k += step) {
-        const p = M4.apply(mat, v[k * 10], v[k * 10 + 1], v[k * 10 + 2]);
-        pts.push(p[0], p[1], p[2]);
-        px0 = Math.min(px0, p[0]); px1 = Math.max(px1, p[0]); py0 = Math.min(py0, p[1]); py1 = Math.max(py1, p[1]); pz0 = Math.min(pz0, p[2]); pz1 = Math.max(pz1, p[2]);
-      }
-      samples.push(Float32Array.from(pts));
-    }
-    // modèle : décompression et ajustement sur la silhouette du pantin
-    const n = M.n;
-    const qp = dec(M.pos, Uint16Array), qn = dec(M.nor, Int8Array), qt = dec(M.uv, Uint16Array);
-    const idx = M.wide ? dec(M.idx, Uint32Array) : dec(M.idx, Uint16Array);
-    let sx = (px1 - px0) / (M.hi[0] - M.lo[0]), sy = (py1 - py0) / M.hi[1];
-    sy = Math.min(sx * 1.25, Math.max(sx * 0.85, sy)); // pas d'écrasement : le modèle garde ses proportions
-    let sz = (sx + sy) / 2; // largeur : proportions du modèle
-    const zc = (pz0 + pz1) / 2;
-    if (DZ.SPECIES[id].habitat !== 'land') {
-      // volants et marins : longueur et envergure, sans déformer le modèle
-      const k = (sx + (pz1 - pz0) / (M.hi[2] - M.lo[2])) / 2;
-      sx = sy = sz = k;
-      py0 = (py0 + py1) / 2 - M.hi[1] * k / 2;
-      px0 = (px0 + px1) / 2 - (M.hi[0] - M.lo[0]) * k / 2;
-    }
-    const P = new Float32Array(n * 3);
-    for (let k = 0; k < n; k++) {
-      const x = M.lo[0] + qp[k * 3] / 65535 * (M.hi[0] - M.lo[0]);
-      const y = qp[k * 3 + 1] / 65535 * M.hi[1];
-      const z = M.lo[2] + qp[k * 3 + 2] / 65535 * (M.hi[2] - M.lo[2]);
-      P[k * 3] = px0 + (x - M.lo[0]) * sx; P[k * 3 + 1] = py0 + y * sy; P[k * 3 + 2] = zc + z * sz;
-    }
-    // poids : pièces les plus proches, lissées sur une courte distance
-    const sig = (px1 - px0) * 0.03;
-    const verts = new Float32Array(n * 20);
-    const d = new Float32Array(nb);
-    let bx0 = 1e9, by0 = 1e9, bz0 = 1e9, bx1 = -1e9, by1 = -1e9, bz1 = -1e9;
-    for (let k = 0; k < n; k++) {
-      const x = P[k * 3], y = P[k * 3 + 1], z = P[k * 3 + 2];
-      for (let b = 0; b < nb; b++) {
-        const s = samples[b];
-        let m = 1e9;
-        for (let j = 0; j < s.length; j += 3) { const dx = s[j] - x, dy = s[j + 1] - y, dz = s[j + 2] - z; const q = dx * dx + dy * dy + dz * dz; if (q < m) m = q; }
-        d[b] = Math.sqrt(m);
-      }
-      const order = Array.from({ length: nb }, (_, b) => b).sort((a, b) => d[a] - d[b]).slice(0, 4);
-      const dmin = d[order[0]];
-      const w = order.map((b) => Math.exp(-Math.pow((d[b] - dmin) / sig, 2)));
-      const ws = w.reduce((a, b) => a + b, 0);
-      const o = k * 20;
-      verts[o] = x; verts[o + 1] = y; verts[o + 2] = z;
-      // normales : l'échelle non uniforme les déforme un peu, on corrige
-      const nx = qn[k * 4] / 127 / sx, ny = qn[k * 4 + 1] / 127 / sy, nz = qn[k * 4 + 2] / 127 / sz, nl = Math.hypot(nx, ny, nz) || 1;
-      verts[o + 3] = nx / nl; verts[o + 4] = ny / nl; verts[o + 5] = nz / nl;
-      verts[o + 6] = 1; verts[o + 7] = 1; verts[o + 8] = 1; verts[o + 9] = 14 / 15;
-      verts[o + 10] = qt[k * 2] / 65535; verts[o + 11] = qt[k * 2 + 1] / 65535;
-      for (let j = 0; j < 4; j++) { verts[o + 12 + j] = order[j]; verts[o + 16 + j] = w[j] / ws; }
-      bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); by0 = Math.min(by0, y); by1 = Math.max(by1, y); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z);
-    }
-    const mesh = G.uploadSkin(gl, { verts, idx: Uint32Array.from(idx), bounds: { x0: bx0, y0: by0, z0: bz0, x1: bx1, y1: by1, z1: bz1 } });
-    // texture (image embarquée : fonctionne aussi depuis file://)
-    const skin = { mesh, nb, invBind: parts.map(([, mat]) => M4.invert(mat)), tex: null };
-    mesh.tex = null;
-    if (M.tex) {
-      const img = new Image();
-      img.onload = () => { skin.tex = mesh.tex = G.texture(gl, img); this.refreshThumbs(id); };
-      img.src = M.tex;
-    }
-    return skin;
-  };
-
-  /* Remplace les pièces du pantin (à partir de start) par le modèle. */
-  R.skinSwap = function (d, out, start) {
-    if (this._binding) return;
-    const skin = this.skinModel(d.sp);
-    if (!skin || !skin.mesh.tex || out.length - start !== skin.nb) return;
-    const bones = new Float32Array(G.MAX_BONES * 16);
-    const tmp = new Float32Array(16);
-    for (let i = 0; i < skin.nb; i++) { M4.mul(out[start + i][1], skin.invBind[i], tmp); bones.set(tmp, i * 16); }
-    out.length = start;
-    out.push([skin.mesh, this.ident || (this.ident = M4.create()), bones]);
   };
 
   /* Tracé d'un maillage à squelette (appelé par drawMesh). */
@@ -308,7 +196,7 @@
     const sc = document.createElement('script');
     sc.src = 'js/models/' + id + '.js';
     sc.onload = sc.onerror = () => {
-      if (this.skinCache) this.skinCache.delete(id);
+      if (this.skelCache) this.skelCache.delete(id);
       cbs.forEach((f) => f());
     };
     document.head.appendChild(sc);
