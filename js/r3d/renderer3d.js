@@ -393,7 +393,7 @@
           const rot = (t[1] % 628) / 100;
           M4.ident(m); M4.translate(m, t[2], w.heightAt(t[2], t[3]), t[3]); M4.rotY(m, rot); M4.scale(m, t[4], t[4], t[4]);
           const v = 0.9 + U.hash(t[1], 3, 4) * 0.2;
-          const pt = plant ? PLANT_TINT[tg.kind] || PLANT_TINT._ : null; // feuillage des modèles réalistes, un peu plus sombre
+          const pt = plant ? plant.tint || PLANT_TINT[tg.kind] || PLANT_TINT._ : null; // feuillage des modèles réalistes, un peu plus sombre
           this.writeInst(arr, i, m, pt ? [v * pt[0], v * pt[1], v * pt[2], rot * 3] : [v, v, v * 0.95, rot * 3]);
         });
         const buf = G.instBuffer(gl, arr);
@@ -433,7 +433,7 @@
       const gl = this.gl, g = this.game, w = this.world;
       G.free(gl, this.static); G.free(gl, this.glass);
       const mb = new G.MB(), glass = new G.MB();
-      this.lights = []; this.smoke = []; this.fountains = [];
+      this.lights = []; this.smoke = []; this.fountains = []; this.props = [];
       for (const id in g.buildings) {
         const b = g.buildings[id], def = C.buildings[b.type];
         if (b.cons) continue; // chantier : dessiné à part, il sort de terre
@@ -446,9 +446,11 @@
           for (const l of out.lights) this.lights.push([l[0], l[1] + h, l[2], l[3]]);
           for (const d of G.enclosureDecor(b, g.gatesOf(b).concat(g.skyRects(b)))) if (d.t === 'rock') G.rockInto(mb, d.x, w.heightAt(d.x, d.z), d.z, d.size, d.sd);
         } else if (b.type !== 'arbre' && b.type !== 'palmier' && b.type !== 'fougere') {
+          const pm = this.propModel(b.type); // modèle réaliste (Meshy) quand il est prêt
           mb.push().t(b.x, h, b.y);
-          const out = G.buildingInto(mb, b);
+          const out = pm ? G.buildingExtras(mb, b, pm) : G.buildingInto(mb, b);
           mb.pop();
+          if (pm) { const m = M4.create(); M4.translate(m, b.x, h, b.y); this.props.push([pm.mesh, m]); }
           for (const l of out.lights) this.lights.push([b.x + l[0], l[1] + h, b.y + l[2], l[3]]);
           for (const s2 of out.smoke) this.smoke.push([b.x + s2[0], s2[1] + h, b.y + s2[2]]);
           if (out.fountain) this.fountains.push([b.x + out.fountain[0], out.fountain[1] + h, b.y + out.fountain[2]]);
@@ -965,6 +967,7 @@
         gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.5, 3);
         this.setCommon(this.P.depth, Lt, this.mLight);
         this.drawMesh(this.P.depth, this.static);
+        this.drawProps(this.P.depth);
         for (const v of vis) if (v.tdist < half + 12) { this.drawMesh(this.P.depth, v.data.deco); if (this.cam.dist > 40) this.drawMesh(this.P.depth, v.data.terrain); }
         for (const [mesh, mat, bones] of parts) this.drawMesh(this.P.depth, mesh, mat, bones);
         this.setCommon(this.P.depthInst, Lt, this.mLight);
@@ -994,6 +997,7 @@
       if (this.far) this.drawMesh(lit, this.far.land);
       for (const v of vis) { this.drawMesh(lit, v.data.terrain); this.drawMesh(lit, v.data.paths); this.drawMesh(lit, v.data.deco); }
       this.drawMesh(lit, this.static);
+      this.drawProps(lit);
       for (const [mesh, mat, bones] of parts) this.drawMesh(lit, mesh, mat, bones);
       const li = this.P.litInst;
       this.setCommon(li, Lt);
@@ -1359,13 +1363,15 @@
     }
 
     ghostMesh(type, level) {
-      const key = type + level;
+      const pm = this.propModel(type);
+      const key = type + level + (pm ? 'p' : '');
       if (this.ghostCache[key]) return this.ghostCache[key];
       const def = C.buildings[type];
       const mb = new G.MB(), glass = new G.MB();
       const fake = { id: -1, type, x: 0, y: 0, w: def.w, h: def.h, level: level || 1, seed: 3 };
       if (def.cat === 'enclos') G.enclosureInto(mb, glass, fake, this.world);
       else if (type === 'arbre' || type === 'palmier' || type === 'fougere') { mb.push().t(0.5, 0, 0.55).s(1.1); mb.add(G.treeMesh(type === 'arbre' ? 'araucaria' : type, 0)); mb.pop(); }
+      else if (pm) G.buildingExtras(mb, fake, pm);
       else G.buildingInto(mb, fake);
       const mesh = G.upload(this.gl, mb.finish());
       this.ghostCache[key] = mesh;
@@ -1425,6 +1431,7 @@
           gl.depthMask(true);
           gl.uniform1f(lit.u.uUnlit, 0); gl.uniform3fv(lit.u.uTint, gh.ok ? [0.5, 1, 0.6] : [1, 0.35, 0.3]); gl.uniform1f(lit.u.uTintAmt, 0.35); gl.uniform1f(lit.u.uAlpha, 0.7);
           this.drawMesh(lit, this.ghostMesh(gh.type, gh.level), m);
+          this.drawPropAt(lit, gh.type, m);
           gl.depthMask(false);
           this.drawRect(lit, gh.x, gh.y, def.w, def.h, gh.ok ? [0.47, 0.9, 0.55] : [0.9, 0.31, 0.24], 0.3, 0.07);
           this.outline(lit, gh.x, gh.y, def.w, def.h, gh.ok ? [0.6, 0.95, 0.65] : [0.95, 0.4, 0.3], 0.95);
@@ -1722,7 +1729,7 @@
         const eye = [cx + dist * 0.55, dist * 0.75, cz + dist * 0.95];
         const view = M4.lookAt(eye, [cx, size * 0.12, cz], [0, 1, 0]);
         const vp = M4.mul(M4.persp(0.62, aspect, 0.05, 80), view);
-        return { vp, eye, draw: (prog) => { this.drawMesh(prog, mesh, null); } };
+        return { vp, eye, draw: (prog) => { this.drawMesh(prog, mesh, null); this.drawPropAt(prog, type, this.ident || (this.ident = M4.create())); } };
       });
     }
   }

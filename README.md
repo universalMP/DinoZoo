@@ -71,11 +71,12 @@ js/fences.js        état des clôtures, charges des animaux, réparations
 js/obstacles.js     décor des enclos, collisions entre dinosaures et avec le décor
 js/r3d/             rendu 3D WebGL 2 : socle (maths, shaders), maillages, terrain et eau,
                     modèles (bâtiments, arbres, visiteurs), dinosaures articulés, moteur
-js/r3d/skin3d.js    modèles réalistes (Meshy) : visiteurs, plantes, chargement progressif
+js/r3d/skin3d.js    modèles réalistes (Meshy) : visiteurs, bâtiments, feuillage sur cartes, chargement progressif
 js/r3d/rigfit.js    squelette ajusté à chaque modèle de dinosaure (os, articulations, poids)
 js/r3d/skel3d.js    animation des dinosaures réalistes par leur squelette
 js/models/          modèles 3D embarqués (un fichier par espèce, créé par tools/glb2js.mjs)
 tools/glb2js.mjs    convertit un modèle .glb en fichier js/models/<espèce>.js
+tools/img2js.mjs    convertit une image (feuillage, écorce) en fichier js/models/<id>.js
 tools/rigview.html  contrôle visuel des squelettes (vues de profil et de dessus)
 docs/references-dinos.md  références de chaque espèce et invites Meshy
 js/audio.js         environnement sonore 3D (Web Audio)

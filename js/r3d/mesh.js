@@ -120,7 +120,14 @@
       const rnd = U.rng(seed);
       const bumps = [];
       for (let i = 0; i < 10; i++) bumps.push([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1, 0.12 + rnd() * 0.28]);
-      const seg = 14, rings = 9;
+      // faces de cassure : plans qui tranchent le bloc (roche fracturée, arêtes nettes)
+      const cuts = [];
+      for (let i = 0; i < 9; i++) {
+        const a = rnd() * TAU, e = (rnd() - 0.25) * 1.4, nx = Math.cos(a) * Math.cos(e), ny = Math.sin(e), nz = Math.sin(a) * Math.cos(e);
+        cuts.push([nx, ny, nz, 0.72 + rnd() * 0.32]);
+      }
+      const stretch = 1 + rnd() * 0.45; // blocs allongés
+      const seg = 18, rings = 11;
       const top = 0.45 + rnd() * 0.25; // bloc érodé : sommet aplati
       const base = this.v.length / 10;
       const pts = [];
@@ -131,10 +138,11 @@
           let nx = Math.sin(v) * Math.cos(u), ny = Math.cos(v), nz = Math.sin(v) * Math.sin(u);
           let d = 1;
           for (const b of bumps) d += b[3] * Math.max(0, nx * b[0] + ny * b[1] + nz * b[2]) ** 3;
-          d *= 0.92 + U.hash(j, k % seg, seed) * 0.16;
+          d *= 0.95 + U.hash(j, k % seg, seed) * 0.1;
+          for (const c of cuts) { const dn = nx * c[0] + ny * c[1] + nz * c[2]; if (dn > 0.05) d = Math.min(d, c[3] * (1.15 + d * 0.1) / dn); }
           let y = ny < -0.2 ? -0.2 : ny;
           if (y > top) y = top + (y - top) * 0.35;
-          pts.push([nx * r * d, Math.max(y * r * d * (flat || 0.7), -0.05), nz * r * d]);
+          pts.push([nx * r * d * stretch, Math.max(y * r * d * (flat || 0.7), -0.05), nz * r * d]);
         }
       }
       // normales approximées par différences

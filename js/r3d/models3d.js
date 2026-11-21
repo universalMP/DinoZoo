@@ -172,10 +172,23 @@
     return mb.finish();
   };
 
+  /* Rocher : bloc fracturé, enfoncé dans le sol, entouré de pierres plus
+     petites et de cailloux (les gros) ; teinte grise à ocre selon le bloc. */
   G.rockInto = function (mb, x, y, z, size, seed) {
     const r = size === 'L' ? 0.42 : size === 'M' ? 0.26 : 0.13;
-    const v = 0.85 + U.hash(seed, 1, 2) * 0.25;
-    mb.push().t(x, y, z).ry(U.hash(seed, 3, 4) * TAU).material('rock').col([0.46 * v, 0.45 * v, 0.42 * v]).rock(r, seed, 0.65).pop();
+    const v = 0.85 + U.hash(seed, 1, 2) * 0.25, warm = U.hash(seed, 5, 6);
+    const col = (k) => [(0.44 + warm * 0.06) * v * k, (0.43 + warm * 0.02) * v * k, (0.41 - warm * 0.04) * v * k];
+    mb.push().t(x, y - r * 0.08, z).ry(U.hash(seed, 3, 4) * TAU).material('rock').col(col(1)).rock(r, seed, 0.65).pop();
+    if (size === 'S') return;
+    const rnd = U.rng(seed + 17), n = size === 'L' ? 3 + ((rnd() * 3) | 0) : 1 + ((rnd() * 2) | 0);
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * TAU, d = r * (0.95 + rnd() * 0.45), rr = r * (0.18 + rnd() * 0.22);
+      mb.push().t(x + Math.cos(a) * d, y - rr * 0.15, z + Math.sin(a) * d).ry(rnd() * TAU).material('rock').col(col(0.9 + rnd() * 0.15)).rock(rr, seed * 7 + i, 0.6).pop();
+    }
+    for (let i = 0; i < n * 3; i++) {
+      const a = rnd() * TAU, d = r * (0.8 + rnd() * 0.9), rr = 0.012 + rnd() * 0.02;
+      mb.push().t(x + Math.cos(a) * d, y - rr * 0.3, z + Math.sin(a) * d).material('rock').col(col(0.85 + rnd() * 0.2)).sphere(rr * 1.3, rr * 0.6, rr, 5, 3).pop();
+    }
   };
 
   /* ------------------------------------------------------------------
@@ -434,21 +447,42 @@
       if (lv === 3) palmTuft(mb, 2.7, 2.65, r);
     },
     poubelle(mb) {
-      mb.material('metal').col('#3d5a3a').push().t(0.5, 0, 0.5).cyl(0.09, 0.1, 0.24, 10).pop();
-      mb.col('#2a3a28').push().t(0.5, 0.24, 0.5).cyl(0.11, 0.05, 0.05, 10).pop();
+      // poubelle de parc : lattes de bois sur cadre métallique, couvercle bombé
+      mb.material('metal').col('#2f3438').push().t(0.5, 0, 0.5).cyl(0.105, 0.105, 0.02, 12).pop();
+      mb.material('wood');
+      for (let i = 0; i < 12; i++) { const a = i / 12 * TAU; mb.col(i % 2 ? '#8a6545' : '#7a5838').push().t(0.5 + Math.cos(a) * 0.095, 0.02, 0.5 + Math.sin(a) * 0.095).ry(-a).box(0.008, 0.22, 0.045).pop(); }
+      mb.material('metal').col('#2f3438');
+      for (const y of [0.07, 0.2]) mb.push().t(0.5, y, 0.5).cyl(0.104, 0.104, 0.012, 12, false).pop();
+      mb.push().t(0.5, 0.24, 0.5).sphere(0.11, 0.035, 0.11, 12, 4).pop();
+      mb.col('#151a1c').push().t(0.5, 0.245, 0.5 + 0.075).box(0.08, 0.02, 0.03).pop();
     },
     banc(mb) {
+      // banc de parc : pieds en fonte, lattes espacées, dossier incliné, accoudoirs
+      mb.material('metal').col('#262b2e');
+      for (const x of [0.17, 0.83]) {
+        mb.push().t(x, 0, 0.5).box(0.025, 0.035, 0.24).pop();
+        mb.push().t(x, 0.02, 0.42).rx(0.1).box(0.022, 0.13, 0.022).pop();
+        mb.push().t(x, 0.02, 0.58).rx(-0.1).box(0.022, 0.13, 0.022).pop();
+        mb.push().t(x, 0.14, 0.5).box(0.024, 0.02, 0.22).pop();
+        mb.push().t(x, 0.14, 0.4).rx(-0.22).box(0.022, 0.2, 0.022).pop();
+        mb.push().t(x, 0.23, 0.48).box(0.022, 0.016, 0.16).pop(); // accoudoir
+      }
       mb.material('wood');
-      for (let i = 0; i < 3; i++) mb.col(i % 2 ? '#a87e54' : '#9a7048').push().t(0.5, 0.14, 0.42 + i * 0.07).box(0.7, 0.025, 0.06).pop();
-      for (let i = 0; i < 2; i++) mb.col('#9a7048').push().t(0.5, 0.2 + i * 0.07, 0.38).box(0.7, 0.05, 0.02).pop();
-      mb.material('metal').col('#2f3438');
-      for (const x of [0.2, 0.8]) mb.push().t(x, 0, 0.48).box(0.04, 0.14, 0.2).pop();
+      for (let i = 0; i < 4; i++) mb.col(i % 2 ? '#a07450' : '#946a46').push().t(0.5, 0.155, 0.43 + i * 0.045).box(0.74, 0.018, 0.036).pop();
+      for (let i = 0; i < 3; i++) mb.col(i % 2 ? '#a07450' : '#946a46').push().t(0.5, 0.2 + i * 0.05, 0.395 - i * 0.012).rx(-0.22).box(0.74, 0.036, 0.016).pop();
     },
     lampadaire(mb, lv, out) {
-      mb.material('metal').col('#2f3438').push().t(0.5, 0, 0.5).cyl(0.035, 0.022, 0.95, 6).pop();
-      mb.push().t(0.5, 0.95, 0.5).cyl(0.07, 0.04, 0.04, 6).pop();
-      mb.material('emissive').col('#ffe6a8').push().t(0.5, 0.99, 0.5).box(0.09, 0.12, 0.09).pop();
-      mb.material('metal').col('#2f3438').push().t(0.5, 1.11, 0.5).cone(0.08, 0.07, 6).pop();
+      // lanterne de parc : socle mouluré, fût cannelé, crosse et lanterne vitrée
+      mb.material('metal').col('#262b2e');
+      mb.push().t(0.5, 0, 0.5).cyl(0.06, 0.05, 0.08, 8).pop();
+      mb.push().t(0.5, 0.08, 0.5).cyl(0.04, 0.03, 0.05, 8).pop();
+      mb.push().t(0.5, 0.13, 0.5).cyl(0.022, 0.016, 0.8, 8).pop();
+      mb.push().t(0.5, 0.93, 0.5).cyl(0.03, 0.03, 0.02, 8).pop();
+      mb.push().t(0.5, 0.95, 0.5).cyl(0.045, 0.06, 0.02, 6).pop();
+      for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; mb.push().t(0.5 + Math.cos(a) * 0.052, 0.97, 0.5 + Math.sin(a) * 0.052).box(0.008, 0.13, 0.008).pop(); }
+      mb.material('emissive').col('#ffe6a8').push().t(0.5, 0.97, 0.5).cyl(0.05, 0.058, 0.13, 6).pop();
+      mb.material('metal').col('#262b2e').push().t(0.5, 1.1, 0.5).cyl(0.075, 0.02, 0.06, 6).pop();
+      mb.push().t(0.5, 1.16, 0.5).sphere(0.015, 0.02, 0.015, 6, 4).pop();
       out.lights.push([0.5, 1.02, 0.5, 2.6]);
     },
     fontaine(mb, lv, out) {
@@ -460,6 +494,37 @@
       out.fountain = [1, 0.62, 1];
       out.lights.push([1, 0.4, 1, 1.4]);
     }
+  };
+
+  /* Bâtiment réaliste (modèle Meshy, G.PROPS) : seuls les accessoires de
+     chaque niveau d'amélioration et les lumières restent procéduraux. */
+  const lamp = (mb, x, z, out) => {
+    mb.material('metal').col('#2f3438').push().t(x, 0, z).cyl(0.022, 0.016, 0.62, 6).pop();
+    mb.material('emissive').col('#ffe2a0').push().t(x, 0.64, z).sphere(0.035, 0.045, 0.035, 6, 4).pop();
+    out.lights.push([x, 0.62, z, 1.1]);
+  };
+  const extras = {
+    entree(mb, lv, out, pm) { out.lights.push([0.45, pm.h * 0.9, 1.1, 2.6], [2.55, pm.h * 0.9, 1.1, 2.6], [2.6, 0.4, 0.9, 1.0]); },
+    boutique(mb, lv, out) {
+      const r = U.rng(11 + lv);
+      if (lv >= 2) { planter(mb, 0.1, 1.85, r); planter(mb, 1.9, 1.85, r); }
+      if (lv >= 3) { lamp(mb, 0.08, 1.2, out); lamp(mb, 1.92, 1.2, out); }
+      out.lights.push([1, 0.35, 1.6, 1.4 + lv * 0.2]);
+    },
+    restaurant(mb, lv, out, pm) {
+      out.smoke.push([pm.cx - pm.w * 0.25, pm.h * 0.95, pm.cz - pm.d * 0.2]);
+      if (lv >= 2) { mb.material('emissive').col('#ffe2a0'); for (let i = 0; i < 12; i++) { const t = (i + 0.5) / 12; mb.push().t(0.15 + t * 2.7, 0.62 - Math.sin(t * Math.PI) * 0.06, 1.97).sphere(0.016, 0.016, 0.016, 5, 3).pop(); } out.lights.push([0.8, 0.5, 1.7, 1.4], [2.2, 0.5, 1.7, 1.4]); }
+      if (lv >= 3) for (const x of [0.06, 2.94]) lamp(mb, x, 1.95, out);
+      out.lights.push([1.5, 0.4, 1.4, 2.0]);
+    },
+    toilettes(mb, lv) { if (lv >= 2) { planter(mb, 0.06, 0.92, U.rng(3)); planter(mb, 1.94, 0.92, U.rng(4)); } },
+    balancoires() {}, toboggan() {}, fauxdino(mb, lv) { const r = U.rng(41 + lv); if (lv >= 2) palmTuft(mb, 0.25, 0.25, r); if (lv === 3) palmTuft(mb, 2.75, 2.75, r); },
+    fontaine(mb, lv, out, pm) { out.fountain = [1, pm.h * 0.85, 1]; out.lights.push([1, 0.4, 1, 1.4]); }
+  };
+  G.buildingExtras = function (mb, b, pm) {
+    const out = { lights: [], smoke: [], fountain: null };
+    if (extras[b.type]) extras[b.type](mb, b.level, out, pm);
+    return out;
   };
 
   G.buildingInto = function (mb, b) {
@@ -609,18 +674,33 @@
       const broken = dk > 0.45, cracked = dk > 0.2;
       mb.push().t(x, 0, z).ry(-ang);
       if (lv === 1) {
-        mb.material('wood').col(i % 2 ? '#8a6240' : '#7a5636').push().rz((U.hash(i, 3, b.seed) - 0.5) * 0.08).rx(tilt).cyl(0.03, 0.026, 0.32 + U.hash(i, 1, b.seed) * 0.05, 6).pop();
-        mb.col('#6e4c30');
-        for (const y of [0.12, 0.27]) if (!broken && !(cracked && y > 0.2)) mb.push().t(len / 2, y + (U.hash(i, y * 10, b.seed) - 0.5) * 0.02, 0).box(len + 0.02, 0.032, 0.028).pop();
-        if (broken) mb.push().t(len * 0.4, 0.03, 0.1).ry(0.6).rz(0.1).box(len * 0.8, 0.03, 0.028).pop(); // lisse tombée
+        // palissade de rondins : poteaux écorcés de teinte variable, lisses rondes qui fléchissent un peu
+        const hv = U.hash(i, 5, b.seed), wc = [0.42 + hv * 0.1, 0.31 + hv * 0.06, 0.21 + hv * 0.04];
+        const ph = 0.34 + U.hash(i, 1, b.seed) * 0.06;
+        mb.material('wood').col(wc).push().rz((U.hash(i, 3, b.seed) - 0.5) * 0.08).rx(tilt).cyl(0.034, 0.028, ph, 8).pop();
+        mb.col([wc[0] * 0.8, wc[1] * 0.8, wc[2] * 0.8]).push().rx(tilt).t(0, ph, 0).cone(0.03, 0.03, 8).pop(); // tête taillée en pointe
+        const rc = [0.36 + hv * 0.06, 0.27 + hv * 0.04, 0.18 + hv * 0.03];
+        for (const y of [0.11, 0.25]) if (!broken && !(cracked && y > 0.2)) {
+          const sag = 0.006 + U.hash(i, y * 10, b.seed) * 0.01;
+          mb.material('wood').col(rc);
+          mb.push().t(0, y, 0).rz(-Math.PI / 2 + sag * 2).cyl(0.02, 0.019, len * 0.52, 6).pop();
+          mb.push().t(len, y, 0).rz(Math.PI / 2 - sag * 2).cyl(0.02, 0.019, len * 0.52, 6).pop();
+        }
+        if (i % 5 === 2 && !broken) mb.material('wood').col(rc).push().t(0, 0.02, 0).rz(-0.95).cyl(0.016, 0.014, 0.36, 5).pop(); // jambe de force
+        if (broken) mb.push().t(len * 0.4, 0.03, 0.1).ry(0.6).rz(Math.PI / 2 + 0.1).cyl(0.02, 0.02, len * 0.8, 6).pop(); // lisse tombée
       } else if (lv === 2) {
+        // clôture électrique : socle et poteaux en béton, isolateurs, potence inclinée vers l'intérieur
         mb.material('stone').col('#9a968c').push().t(len / 2, 0, 0).box(len + 0.04, 0.05, 0.1).pop();
-        mb.material('metal').col('#6e767c').push().rx(tilt).box(0.05, 0.66, 0.05).pop();
-        mb.col('#2f3438').push().rx(tilt).t(0, 0.66, 0).box(0.09, 0.03, 0.09).pop();
-        if (i % 3 === 1 && !broken) mb.material('emissive').col('#ffe2a0').push().t(0, 0.7, 0).sphere(0.025, 0.025, 0.025, 5, 3).pop();
+        mb.material('stone').col('#b2ada2').push().rx(tilt).cyl(0.038, 0.03, 0.66, 6).pop();
+        mb.material('metal').col('#4a5054').push().rx(tilt).t(0, 0.64, 0).rx(0.55).box(0.02, 0.18, 0.02).pop();
+        if (i % 3 === 1 && !broken) mb.material('emissive').col('#ffe2a0').push().t(0, 0.71, 0).sphere(0.022, 0.022, 0.022, 5, 3).pop();
         if (i % 4 === 2 && !broken) { mb.push().t(len / 2, 0.3, 0.035); sign(mb, 0.16, 0.08, '⚡ DANGER', 0.01); mb.pop(); }
-        mb.material('metal').col('#30363a');
-        for (let k = 0; k < 5; k++) if (!broken && !(cracked && k > 1)) mb.push().t(len / 2, 0.1 + k * 0.12, 0).box(len + 0.02, 0.008, 0.008).pop();
+        for (let k = 0; k < 5; k++) {
+          const y = 0.1 + k * 0.12;
+          mb.material('plain').col('#e8e2d2').push().rx(tilt).t(0, y, 0.03).rx(Math.PI / 2).cyl(0.012, 0.009, 0.03, 5).pop(); // isolateur
+          if (!broken && !(cracked && k > 1)) mb.material('metal').col('#30363a').push().t(len / 2, y - 0.002 - (k % 2) * 0.004, 0.05).box(len + 0.02, 0.006, 0.006).pop();
+        }
+        if (!broken) for (let k = 0; k < 2; k++) mb.material('metal').col('#30363a').push().t(len / 2, 0.68 + k * 0.05, -0.04 - k * 0.04).box(len + 0.02, 0.006, 0.006).pop();
         if (i % 3 === 1 && !broken) out.lights.push([b.x + x, 0.75, b.y + z, 1.5]);
       } else {
         mb.material('stone').col('#a8a49a').push().t(len / 2, 0, 0).box(len + 0.03, 0.13, 0.12).pop();

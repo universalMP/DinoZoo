@@ -45,12 +45,20 @@ Décisions prises pendant le développement, là où la demande était ambiguë 
 
 ## Décor réaliste et collisions
 
-- **Plantes** : les 7 sortes de plantes du décor (forêts, enclos, décor posé par le joueur) utilisent des modèles Meshy légers, de 500 à 1 400 triangles, car elles sont dessinées par milliers.
-  - Ces modèles sont dessinés en lot, avec leur texture, et se balancent au vent (matériau 15).
-  - Au loin, la version simplifiée procédurale reste.
-  - Le buisson Meshy était raté (un bloc beige) : le buisson réutilise la touffe de feuilles de la fougère, plus petite et plus foncée.
-  - Les forêts sont redessinées une fois quand les plantes arrivent.
-  - Elles coûtent moins cher à dessiner que les anciennes plantes, faites de boules empilées : au-dessus d'une forêt dense, 31 images/s au lieu de 19 à 20.
+- **Bâtiments et équipements** (`G.PROPS`, `js/r3d/skin3d.js`) : entrée, boutique, restaurant et toilettes (Meshy, qualité maximale), aires de jeux et fontaine (Meshy 6 lite, deux fois moins cher), générés à partir d'images de concept comme les dinosaures.
+  - Chaque modèle est posé dans son emprise, face vers +Z, et dessiné à part avec sa texture (ombres comprises).
+  - Les trois niveaux d'amélioration gardent le même modèle ; les accessoires de chaque niveau (bacs à fleurs, lampadaires, guirlandes, palmiers) et les lumières restent procéduraux (`G.buildingExtras`).
+  - Balançoires : le portique est tassé à la hauteur de la poutre qui porte les balançoires animées. Toboggan et dino à grimper : hauteur limitée pour rester près du trajet des enfants.
+  - Le chantier et les bâtiments dont le modèle n'est pas encore chargé gardent la version procédurale.
+- **Feuillage sur cartes** : les anciens modèles Meshy de plantes (feuilles triangulaires grossières) sont remplacés.
+  - Une photo de feuillage par sorte (Meshy text-to-image : fronde de palmier, branche d'araucaria, fronde de fougère et de cycas, rameaux de ginkgo et de buisson) et une écorce, converties par `tools/img2js.mjs`.
+  - Au chargement, le fond blanc devient transparent ; le shader découpe le contour des feuilles, ombres comprises.
+  - Chaque plante : un tronc texturé d'écorce, puis des frondes, branches (en croix pour l'araucaria) ou rameaux en bandes courbes ; normales « de couronne » et lumière enveloppante pour un feuillage régulier.
+  - L'arbre mort reste un modèle Meshy ; au loin, la version simplifiée procédurale reste.
+- **Rochers** : blocs fracturés (plans de cassure), allongés, enfoncés dans le sol, entourés de pierres et de cailloux.
+- **Clôtures** : palissade de rondins (têtes taillées, lisses rondes qui fléchissent, jambes de force) ; clôture électrique en béton avec isolateurs et potence inclinée.
+- **Mobilier** : banc à pieds en fonte et accoudoirs, lanterne de parc, poubelle à lattes et couvercle.
+- Coût du décor : 267 crédits Meshy (8 images et 1 reprise, 4 modèles à 30, 4 à 15, 7 textures).
 - **Shader** :
   - sol : plaques d'herbe sèche et dense, grain d'herbe et cailloux de près, roche qui affleure dans les pentes, teintes moins saturées ;
   - rochers : strates, rares fissures, mousse et lichen sur le dessus, relief simulé, et une silhouette de bloc érodé au sommet aplati ;
@@ -62,7 +70,7 @@ Décisions prises pendant le développement, là où la demande était ambiguë 
   - Deux adversaires d'un même combat, ou une chasse en cours, peuvent se toucher.
   - Obstacles : rochers, arbres et plantes de l'enclos, piliers des passerelles d'observation.
   - Le décor des enclos est désormais tiré au sort par la logique du jeu (`DZ.enclosureDecor`), et le rendu le dessine au même endroit.
-  - Les espèces plus hautes que le dessous du tablier ne passent pas sous une passerelle : Brachiosaure, Diplodocus, Stégosaure, T-Rex, Allosaure.
+  - Les espèces plus hautes que le dessous du tablier ne passent pas sous une passerelle : Brachiosaure, Diplodocus, Stégosaure, T-Rex, Allosaure, et depuis les modèles réalistes Spinosaure (voile) et Tricératops (collerette).
   - Les promenades choisissent un but atteignable sans obstacle sur le trajet. Un animal bloqué plus de 1,2 s change de but.
   - Les évadés, les transferts, les passages par une passerelle d'enclos et les charges contre la clôture ne sont pas concernés.
   - Test sur 3 minutes simulées, avec 13 dinosaures dans des enclos chargés : aucun dinosaure hors de la clôture, et aucun sur un pilier. Les chevauchements nets disparaissent une fois la dispersion de l'arrivée passée.

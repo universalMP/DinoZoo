@@ -219,11 +219,13 @@ DZ.G = DZ.G || {};
       float mat = vCol.a;
       vec3 N = normalize(vNor);
       vec3 Vv = normalize(uCam - vPos);
-      if (dot(N, Vv) < 0.0) N = -N;
+      if (mat != 15.0 && dot(N, Vv) < 0.0) N = -N; // le feuillage garde sa normale de couronne
       float spec = 0.0, shin = 24.0, emis = 0.0;
       if (mat == 13.0) { col = texture(uAtlas, vCol.rg).rgb; emis = uNight * 0.5; }
       else if (mat == 14.0 || mat == 15.0) { // modèles Meshy texturés (15 : végétation, balancée par le vent)
-        col *= texture(uTex, vUv).rgb;
+        vec4 tx = texture(uTex, vUv);
+        if (mat == 15.0 && tx.a < 0.45) discard; // feuillage sur cartes : découpe du contour des feuilles
+        col *= tx.rgb;
         spec = mat == 15.0 ? 0.04 : 0.16; shin = 22.0;
       }
       else if (mat == 1.0) { // peau écailleuse
@@ -308,7 +310,7 @@ DZ.G = DZ.G || {};
       } else if (mat == 12.0) { // verre
         spec = 1.0; shin = 90.0;
       }
-      float ndl = max(dot(N, uSunDir), 0.0);
+      float ndl = mat == 15.0 ? clamp(dot(N, uSunDir) * 0.6 + 0.4, 0.0, 1.0) : max(dot(N, uSunDir), 0.0); // feuillage : lumière enveloppante
       float sh = shadowAt(vLight);
       vec3 amb = mix(uGroundCol, uSkyCol, N.y * 0.5 + 0.5);
       float ao = mat == 2.0 ? 1.0 : 0.82 + 0.18 * clamp(vPos.y * 2.0 + 0.4, 0.0, 1.0);
@@ -336,8 +338,14 @@ DZ.G = DZ.G || {};
   const DEPTH_VS = (inst) => LIT_VS(inst);
   const DEPTH_FS = `#version 300 es
     precision mediump float;
+    in vec4 vCol; in vec2 vUv;
+    uniform sampler2D uTex;
     out vec4 o;
-    void main() { o = vec4(1.0); }`;
+    void main() {
+      // feuillage sur cartes : l'ombre suit le contour des feuilles
+      if (vCol.a == 15.0 && texture(uTex, vUv).a < 0.45) discard;
+      o = vec4(1.0);
+    }`;
 
   const WATER_VS = `#version 300 es
     precision highp float;
