@@ -127,10 +127,10 @@ DZ.G = DZ.G || {};
   const LIT_VS = (inst) => `#version 300 es
     precision highp float;
     in vec3 aPos; in vec3 aNor; in vec4 aCol;
-    ${inst ? 'in vec4 iM0; in vec4 iM1; in vec4 iM2; in vec4 iM3; in vec4 iTint; in vec3 iS1; in vec3 iS2; in vec3 iS3;' : ''}
+    ${inst ? 'in vec4 iM0; in vec4 iM1; in vec4 iM2; in vec4 iM3; in vec4 iTint; in vec3 iS1; in vec3 iS2; in vec3 iS3;' : 'in vec2 aUV; in vec4 aJ; in vec4 aW; uniform mat4 uBones[32]; uniform float uSkin;'}
     uniform mat4 uModel, uVP, uLightVP;
     uniform float uTime, uWind;
-    out vec3 vPos; out vec3 vNor; out vec4 vCol; out vec3 vLocal; out vec4 vLight;
+    out vec3 vPos; out vec3 vNor; out vec4 vCol; out vec3 vLocal; out vec4 vLight; out vec2 vUv;
     void main() {
       mat4 Mo = uModel;
       vec3 col = aCol.rgb;
@@ -144,7 +144,12 @@ DZ.G = DZ.G || {};
       else if (distance(col, vec3(0.0, 1.0, 1.0)) < 0.05) col = iS2;
       else if (distance(col, vec3(1.0, 1.0, 0.0)) < 0.05) col = iS3;
       else col *= iTint.rgb;
-      ` : ''}
+      ` : `
+      // modèle à squelette : chaque sommet suit jusqu'à 4 os du pantin
+      if (uSkin > 0.5) Mo = uModel * (uBones[int(aJ.x)] * aW.x + uBones[int(aJ.y)] * aW.y + uBones[int(aJ.z)] * aW.z + uBones[int(aJ.w)] * aW.w);
+      vUv = aUV;
+      `}
+      ${inst ? 'vUv = vec2(0.0);' : ''}
       vec3 p = aPos;
       if (mat == 7.0) {
         float h = max(p.y, 0.0);
@@ -164,7 +169,8 @@ DZ.G = DZ.G || {};
   const LIT_FS = `#version 300 es
     precision highp float;
     precision highp sampler2DShadow;
-    in vec3 vPos; in vec3 vNor; in vec4 vCol; in vec3 vLocal; in vec4 vLight;
+    in vec3 vPos; in vec3 vNor; in vec4 vCol; in vec3 vLocal; in vec4 vLight; in vec2 vUv;
+    uniform sampler2D uTex;
     uniform vec3 uSunDir, uSunCol, uSkyCol, uGroundCol, uFogCol, uCam, uLightCol, uTint;
     uniform vec2 uFog;
     uniform float uTime, uNight, uShadowOn, uAlpha, uTintAmt, uUnlit;
@@ -192,6 +198,10 @@ DZ.G = DZ.G || {};
       if (dot(N, Vv) < 0.0) N = -N;
       float spec = 0.0, shin = 24.0, emis = 0.0;
       if (mat == 13.0) { col = texture(uAtlas, vCol.rg).rgb; emis = uNight * 0.5; }
+      else if (mat == 14.0) { // peau texturée (modèles Meshy)
+        col *= texture(uTex, vUv).rgb;
+        spec = 0.16; shin = 22.0;
+      }
       else if (mat == 1.0) { // peau écailleuse
         vec3 q = vLocal * 26.0;
         float sc = vnoise(q) * 0.6 + vnoise(q * 2.3) * 0.4;
@@ -397,7 +407,8 @@ DZ.G = DZ.G || {};
     return { p, u };
   }
 
-  const ATTR = ['aPos', 'aNor', 'aCol', 'iM0', 'iM1', 'iM2', 'iM3', 'iTint', 'iS1', 'iS2', 'iS3'];
+  const ATTR = ['aPos', 'aNor', 'aCol', 'iM0', 'iM1', 'iM2', 'iM3', 'iTint', 'iS1', 'iS2', 'iS3', 'aUV', 'aJ', 'aW'];
+  G.MAX_BONES = 32;
 
   G.createPrograms = function (gl) {
     return {
@@ -430,6 +441,34 @@ DZ.G = DZ.G || {};
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data.idx, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
     return { vao, vbo, ibo, count: data.idx.length, inst: null, instBuf: null, instCount: 0, bounds: data.bounds };
+  };
+
+  /* Maillage à squelette : position (3), normale (3), couleur (4), uv (2),
+     os (4), poids (4). */
+  G.uploadSkin = function (gl, data) {
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, data.verts, gl.STATIC_DRAW);
+    const stride = 20 * 4;
+    [[0, 3, 0], [1, 3, 12], [2, 4, 24], [11, 2, 40], [12, 4, 48], [13, 4, 64]].forEach(([loc, n, o]) => { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, stride, o); });
+    const ibo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data.idx, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    return { vao, vbo, ibo, count: data.idx.length, inst: null, instBuf: null, instCount: 0, bounds: data.bounds, skin: true };
+  };
+  G.texture = function (gl, img) {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
   };
 
   /* Ajoute un tampon d'instances (matrice + teinte + 3 couleurs). */

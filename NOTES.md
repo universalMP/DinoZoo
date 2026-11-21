@@ -2,6 +2,25 @@
 
 Décisions prises pendant le développement, là où la demande était ambiguë ou muette.
 
+## Modèles réalistes générés avec Meshy (test)
+
+- Pour un rendu plus réaliste, une espèce peut recevoir un vrai modèle 3D texturé, généré avec Meshy. Premier essai sur les trois dinosaures les moins chers : Compsognathus, Dryosaurus et Psittacosaurus.
+- Le jeu doit tourner depuis file:// sans bibliothèque. Le modèle .glb est donc converti en script par `tools/glb2js.mjs` :
+  - positions et UV sur 16 bits, normales sur 8 bits ;
+  - texture réduite en JPEG 1024 px ;
+  - environ 700 Ko par espèce.
+- Les fichiers .glb bruts restent dans `meshy_output/`, qui n'est pas versionné.
+- L'animation de Meshy ne gère que les humanoïdes. Le modèle est donc attaché au pantin procédural déjà animé (`js/r3d/skin3d.js`) :
+  - chaque pièce du pantin (corps, queue, cou, tête, mâchoire, cuisses, jambes, pieds, bras) devient un os ;
+  - le modèle est ajusté sur la silhouette du pantin au repos, et chaque sommet suit les 4 pièces les plus proches, avec des poids lissés ;
+  - toutes les animations existantes s'appliquent sans changement : marche, repos, repas, cri, combat, transport, bébés.
+- Le calcul se fait au premier affichage de l'espèce (environ 25 ms). Le shader fait le reste : jusqu'à 32 os, matériau 14 « peau texturée ».
+- Tant que la texture n'est pas chargée, ou pour une espèce sans modèle, c'est le pantin procédural qui s'affiche.
+- Pour ajouter une espèce :
+  1. générer le .glb (Meshy text-to-3d, environ 6 000 triangles, texture 2k) ;
+  2. lancer `node tools/glb2js.mjs --id <espèce> --in <fichier.glb>` (option `--yaw` si la tête n'est pas tournée vers +X) ;
+  3. ajouter la balise `<script>` dans `index.html`.
+
 ## Évasions et fin de partie
 
 - **Qui s'évade** : n'importe quel dinosaure terrestre adulte, derrière une clôture de niveau 1 ou 2, ou des murs de verre très abîmés (volières et lagons ne sont pas concernés). Risque par animal et par jour, clôture neuve : petit herbivore 0,6 %, moyen 1,2 %, grand 3 % ; ×5 pour un carnivore (un grand carnivore derrière une palissade neuve : 15 % par jour) ; ×0,2 avec une clôture électrifiée ; ×1,8 si l'animal est malheureux ; × l'usure de la clôture (voir ci-dessous). Au plus une évasion par jour dans le parc, à partir du jour 3, entre 9 h 30 et 16 h 30. Le panneau de l'enclos affiche ce risque.

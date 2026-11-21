@@ -476,7 +476,7 @@
     rig(id) {
       if (this.rigCache[id]) return this.rigCache[id];
       const gl = this.gl, raw = G.buildDinoRig(id);
-      const up = (d) => d ? G.upload(gl, d) : null;
+      const up = (d) => { if (!d) return null; const m = G.upload(gl, d); m.raw = d.verts; return m; };
       const r = Object.assign({}, raw);
       if (raw.plan === 'ptero') { r.body = up(raw.body); r.head = up(raw.head); r.wing = up(raw.wing); }
       else if (raw.plan === 'plesio' || raw.plan === 'mosa') {
@@ -576,6 +576,7 @@
       if (sleep > 0) { M4.rotX(hip, sleep * 0.32 * (1 - lift) + (d.tr && d.tr.phase === 'drowsy' ? Math.sin(d.t * 5) * 0.08 * (1 - sleep) : 0)); }
       if (state === 'fight') { const k = d.fightK || 0; M4.rotZ(hip, (sp.fight === 'butt' ? -0.1 : 0.06) * k); if (sp.fight === 'tail') M4.rotY(hip, Math.sin(d.anim * 4) * 0.35); }
       const body = M4.copy(hip); M4.scale(body, 1, 1 + Math.sin(seedT * 1.7) * 0.012, 1 + Math.sin(seedT * 1.7) * 0.008);
+      const skinStart = out.length;
       out.push([rig.body, body]);
       // queue
       let m = M4.copy(hip); M4.translate(m, rig.tailBase[0], rig.tailBase[1], 0);
@@ -634,6 +635,7 @@
         out.push([rig.arm.mesh, am]);
       }
       if (state === 'roar' && d.anim < 0.3 && C.dinos[d.sp].space >= 5 && Math.random() < 0.3) this.burst3(x, z, 0.3, 'dust');
+      this.skinSwap(d, out, skinStart);
       return { x, y: gy, z, r: rig.len * 0.5 * kAge, h: rig.height * kAge, head: headPos, lifted: lift };
     }
 
@@ -741,6 +743,8 @@
       if (u.uWind) gl.uniform1f(u.uWind, 1 + this.game.stormIntensity() * 3);
       if (u.uNight) gl.uniform1f(u.uNight, Lt.lamp);
       if (u.uShadowOn !== undefined && u.uShadowOn) gl.uniform1f(u.uShadowOn, this.shadow && !Lt.noShadow ? 1 : 0);
+      if (u.uTex) { gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.whiteTex()); gl.uniform1i(u.uTex, 2); }
+      if (u.uSkin) gl.uniform1f(u.uSkin, 0);
       if (u.uShadow) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.shadow && !Lt.noShadow ? this.shadow.tex : this.dummyDepth()); gl.uniform1i(u.uShadow, 0); }
       if (u.uAtlas) { gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.atlas); gl.uniform1i(u.uAtlas, 1); }
       if (u.uShadowTexel && this.shadow) gl.uniform2f(u.uShadowTexel, 1 / this.shadow.size, 1 / this.shadow.size);
@@ -766,8 +770,9 @@
       return this._dummy;
     }
 
-    drawMesh(prog, mesh, model) {
+    drawMesh(prog, mesh, model, bones) {
       if (!mesh) return;
+      if (bones) return this.drawSkinned(prog, mesh, bones);
       const gl = this.gl;
       gl.uniformMatrix4fv(prog.u.uModel, false, model || this.ident);
       gl.bindVertexArray(mesh.vao);
@@ -933,7 +938,7 @@
         this.setCommon(this.P.depth, Lt, this.mLight);
         this.drawMesh(this.P.depth, this.static);
         for (const v of vis) if (v.tdist < half + 12) { this.drawMesh(this.P.depth, v.data.deco); if (this.cam.dist > 40) this.drawMesh(this.P.depth, v.data.terrain); }
-        for (const [mesh, mat] of parts) this.drawMesh(this.P.depth, mesh, mat);
+        for (const [mesh, mat, bones] of parts) this.drawMesh(this.P.depth, mesh, mat, bones);
         this.setCommon(this.P.depthInst, Lt, this.mLight);
         for (const v of vis) if (v.tdist < half + 12) this.drawTrees(this.P.depthInst, v.data, v.near);
         this.drawInst(this.P.depthInst, this.personBody);
@@ -960,7 +965,7 @@
       if (this.far) this.drawMesh(lit, this.far.land);
       for (const v of vis) { this.drawMesh(lit, v.data.terrain); this.drawMesh(lit, v.data.paths); this.drawMesh(lit, v.data.deco); }
       this.drawMesh(lit, this.static);
-      for (const [mesh, mat] of parts) this.drawMesh(lit, mesh, mat);
+      for (const [mesh, mat, bones] of parts) this.drawMesh(lit, mesh, mat, bones);
       const li = this.P.litInst;
       this.setCommon(li, Lt);
       for (const v of vis) {
@@ -1672,7 +1677,7 @@
         const cy = ctr[1];
         const view = M4.lookAt(eye, [ctr[0], cy, ctr[2]], air ? [1, 0, 0] : water ? [0, 0, -1] : [0, 1, 0]);
         const vp = M4.mul(M4.persp(0.7, aspect, 0.02, 50), view);
-        return { vp, eye, draw: (prog) => { for (const [mesh, mat] of parts) this.drawMesh(prog, mesh, mat); } };
+        return { vp, eye, draw: (prog) => { for (const [mesh, mat, bones] of parts) this.drawMesh(prog, mesh, mat, bones); } };
       });
     }
     thumbBuilding(type, w, h) {

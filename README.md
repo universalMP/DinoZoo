@@ -70,6 +70,9 @@ js/escapes.js       évasions, panique, fin de partie
 js/fences.js        état des clôtures, charges des animaux, réparations
 js/r3d/             rendu 3D WebGL 2 : socle (maths, shaders), maillages, terrain et eau,
                     modèles (bâtiments, arbres, visiteurs), dinosaures articulés, moteur
+js/r3d/skin3d.js    modèles réalistes (Meshy) attachés au squelette des dinosaures
+js/models/          modèles 3D embarqués (un fichier par espèce, créé par tools/glb2js.mjs)
+tools/glb2js.mjs    convertit un modèle .glb en fichier js/models/<espèce>.js
 js/audio.js         environnement sonore 3D (Web Audio)
 js/music.js         orchestre de synthèse et thèmes musicaux
 js/save.js          sauvegarde locale
