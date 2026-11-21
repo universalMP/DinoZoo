@@ -137,4 +137,8 @@ DZ.MODELS[${JSON.stringify(args.id)}] = {
 `;
 fs.mkdirSync(path.dirname(outFile), { recursive: true });
 fs.writeFileSync(outFile, out);
+// manifeste : liste des modèles disponibles, chargés à la demande par le jeu
+const dir = path.dirname(outFile);
+const ids = fs.readdirSync(dir).filter((f) => f.endsWith('.js') && f !== 'index.js').map((f) => f.slice(0, -3)).sort();
+fs.writeFileSync(path.join(dir, 'index.js'), `/* Modèles 3D disponibles (mis à jour par tools/glb2js.mjs). */\nwindow.DZ = window.DZ || {};\nDZ.MODEL_FILES = ${JSON.stringify(ids)};\n`);
 console.log(`${args.id}: ${nv} sommets, ${qi.length / 3} triangles, taille ${(b1[0] - b0[0]).toFixed(3)} × ${(b1[1]).toFixed(3)} × ${(b1[2] - b0[2]).toFixed(3)}, ${(out.length / 1024).toFixed(0)} Ko → ${path.relative(process.cwd(), outFile)}`);

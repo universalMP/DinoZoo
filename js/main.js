@@ -35,6 +35,8 @@ window.DZ = window.DZ || {};
     ui.quality = quality;
     ui.moneyShown = game.s.money;
     DZ.tutorial.init(game, ui);
+    // modèles 3D réalistes : chargés peu à peu, après le démarrage
+    setTimeout(() => renderer.preloadModels(), 800);
 
     ui.onQuality = (q, manual) => {
       quality = q;

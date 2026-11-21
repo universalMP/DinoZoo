@@ -22,7 +22,7 @@
 
   /* Pose de repos du pantin : liste [maillage, matrice], tête droite. */
   R.bindPose = function (id) {
-    const fake = { id: -98, sp: id, x: 0, y: 0, face: 1, phase: 0, moving: 0, state: 'idle', anim: 0, heading: 0, gx: 1, gy: 0 };
+    const fake = { id: -98, sp: id, x: 0, y: 0, face: 1, phase: 0, moving: 0, state: 'idle', anim: 0, heading: 0, gx: 1, gy: 0, alt: 18, surf: 0.6 };
     const parts = [];
     const saveH = this.world.heightAt;
     this.world.heightAt = () => 0;
@@ -36,9 +36,11 @@
   R.skinModel = function (id) {
     this.skinCache = this.skinCache || new Map();
     if (this.skinCache.has(id)) return this.skinCache.get(id);
-    let res = null;
+    if (this.noModels) return null;
     const M = DZ.MODELS && DZ.MODELS[id];
-    if (M && DZ.SPECIES[id] && DZ.SPECIES[id].habitat === 'land' && !this.noModels) {
+    if (!M) { this.requestModel(id); return null; } // pas encore chargé
+    let res = null;
+    if (DZ.SPECIES[id]) {
       try { res = this.buildSkin(id, M); } catch (e) { console.warn('Modèle 3D ' + id + ' ignoré :', e); res = null; }
     }
     this.skinCache.set(id, res);
@@ -69,15 +71,23 @@
     const n = M.n;
     const qp = dec(M.pos, Uint16Array), qn = dec(M.nor, Int8Array), qt = dec(M.uv, Uint16Array);
     const idx = M.wide ? dec(M.idx, Uint32Array) : dec(M.idx, Uint16Array);
-    const sx = (px1 - px0) / (M.hi[0] - M.lo[0]), sy = (py1 - Math.max(0, py0)) / M.hi[1];
-    const sz = (sx + sy) / 2; // largeur : proportions du modèle
+    let sx = (px1 - px0) / (M.hi[0] - M.lo[0]), sy = (py1 - py0) / M.hi[1];
+    sy = Math.min(sx * 1.25, Math.max(sx * 0.85, sy)); // pas d'écrasement : le modèle garde ses proportions
+    let sz = (sx + sy) / 2; // largeur : proportions du modèle
     const zc = (pz0 + pz1) / 2;
+    if (DZ.SPECIES[id].habitat !== 'land') {
+      // volants et marins : longueur et envergure, sans déformer le modèle
+      const k = (sx + (pz1 - pz0) / (M.hi[2] - M.lo[2])) / 2;
+      sx = sy = sz = k;
+      py0 = (py0 + py1) / 2 - M.hi[1] * k / 2;
+      px0 = (px0 + px1) / 2 - (M.hi[0] - M.lo[0]) * k / 2;
+    }
     const P = new Float32Array(n * 3);
     for (let k = 0; k < n; k++) {
       const x = M.lo[0] + qp[k * 3] / 65535 * (M.hi[0] - M.lo[0]);
       const y = qp[k * 3 + 1] / 65535 * M.hi[1];
       const z = M.lo[2] + qp[k * 3 + 2] / 65535 * (M.hi[2] - M.lo[2]);
-      P[k * 3] = px0 + (x - M.lo[0]) * sx; P[k * 3 + 1] = Math.max(0, py0) + y * sy; P[k * 3 + 2] = zc + z * sz;
+      P[k * 3] = px0 + (x - M.lo[0]) * sx; P[k * 3 + 1] = py0 + y * sy; P[k * 3 + 2] = zc + z * sz;
     }
     // poids : pièces les plus proches, lissées sur une courte distance
     const sig = (px1 - px0) * 0.03;
@@ -112,7 +122,7 @@
     mesh.tex = null;
     if (M.tex) {
       const img = new Image();
-      img.onload = () => { skin.tex = mesh.tex = G.texture(gl, img); this._thumbDirty = true; };
+      img.onload = () => { skin.tex = mesh.tex = G.texture(gl, img); this.refreshThumbs(id); };
       img.src = M.tex;
     }
     return skin;
@@ -141,6 +151,136 @@
     gl.bindVertexArray(mesh.vao);
     gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_INT, 0);
     gl.uniform1f(u.uSkin, 0);
+  };
+
+  /* ------------------------------------------------------------------
+     Visiteurs réalistes : un modèle Meshy par silhouette, dessiné en lot
+     (instances). Les jambes et les bras sont repérés sur le modèle (pose
+     en A) ; le shader les fait pivoter à la hanche et à l'épaule.
+     ------------------------------------------------------------------ */
+  const PERSON_H = 0.38; // hauteur des visiteurs procéduraux
+  G.PEOPLE = { adult: ['v_man', 'v_woman', 'v_senior', 'v_young'], child: ['v_boy', 'v_girl'] };
+  R.peopleModel = function (id) {
+    this.peopleCache = this.peopleCache || new Map();
+    if (this.peopleCache.has(id)) return this.peopleCache.get(id);
+    if (this.noModels) return null;
+    const M = DZ.MODELS && DZ.MODELS[id];
+    if (!M) { this.requestModel(id); return null; }
+    let res = null;
+    try { res = this.buildPerson(id, M); } catch (e) { console.warn('Visiteur ' + id + ' ignoré :', e); }
+    this.peopleCache.set(id, res);
+    return res;
+  };
+  R.buildPerson = function (id, M) {
+    const gl = this.gl, n = M.n;
+    const qp = dec(M.pos, Uint16Array), qn = dec(M.nor, Int8Array), qt = dec(M.uv, Uint16Array);
+    const idx = M.wide ? dec(M.idx, Uint32Array) : dec(M.idx, Uint16Array);
+    const k = PERSON_H / M.hi[1];
+    const P = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      P[i * 3] = (M.lo[0] + qp[i * 3] / 65535 * (M.hi[0] - M.lo[0])) * k;
+      P[i * 3 + 1] = qp[i * 3 + 1] / 65535 * M.hi[1] * k;
+      P[i * 3 + 2] = (M.lo[2] + qp[i * 3 + 2] / 65535 * (M.hi[2] - M.lo[2])) * k;
+    }
+    const H = PERSON_H;
+    // proportions humaines : entrejambe à 46 % de la taille (43 % chez l'enfant)
+    const crotch = (G.PEOPLE.child.indexOf(id) >= 0 ? 0.43 : 0.46) * H;
+    const hip = crotch + 0.05 * H, shoulder = 0.8 * H;
+    const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const verts = new Float32Array(n * 20);
+    for (let i = 0; i < n; i++) {
+      const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2], o = i * 20;
+      verts[o] = x; verts[o + 1] = y; verts[o + 2] = z;
+      verts[o + 3] = qn[i * 4] / 127; verts[o + 4] = qn[i * 4 + 1] / 127; verts[o + 5] = qn[i * 4 + 2] / 127;
+      verts[o + 6] = 1; verts[o + 7] = 1; verts[o + 8] = 1; verts[o + 9] = 14 / 15;
+      verts[o + 10] = qt[i * 2] / 65535; verts[o + 11] = qt[i * 2 + 1] / 65535;
+      const side = sm(-0.01 * H, 0.01 * H, x);
+      // bras d'abord (en pose A, ils sont hors du tronc), puis jambes sous l'entrejambe
+      const arm = sm(0.115 * H, 0.15 * H, Math.abs(x)) * sm(0.3 * H, 0.36 * H, y) * (1 - sm(0.84 * H, 0.88 * H, y));
+      const leg = sm(hip + 0.03 * H, crotch - 0.02 * H, y) * (1 - arm);
+      verts[o + 16] = leg * side; verts[o + 17] = leg * (1 - side);
+      verts[o + 18] = x > 0 ? arm : 0; verts[o + 19] = x < 0 ? arm : 0;
+    }
+    let y1 = 0;
+    for (let i = 1; i < n * 3; i += 3) y1 = Math.max(y1, P[i]);
+    const mesh = G.enableInstancing(gl, G.uploadSkin(gl, { verts, idx: Uint32Array.from(idx), bounds: { x0: -0.1, y0: 0, z0: -0.1, x1: 0.1, y1, z1: 0.1 } }));
+    const pm = { mesh, hip, shoulder, tex: null, data: null, count: 0 };
+    if (M.tex) { const img = new Image(); img.onload = () => { pm.tex = mesh.tex = G.texture(gl, img); }; img.src = M.tex; }
+    return pm;
+  };
+  /* Légère variation de teinte par visiteur (les vêtements de la texture sont fixes). */
+  const TINTS = [];
+  for (let i = 0; i < 16; i++) { const h = (i * 0.618) % 1; TINTS.push([0.9 + 0.14 * Math.abs(Math.sin(h * 6.3)), 0.9 + 0.12 * Math.abs(Math.sin(h * 6.3 + 2)), 0.88 + 0.14 * Math.abs(Math.sin(h * 6.3 + 4)), 0]); }
+  R.personTint = function (v) { return TINTS[(v * 7 + (v >> 4)) % TINTS.length]; };
+  /* Silhouette prête pour ce visiteur (ou null : visiteur procédural). */
+  R.personVariant = function (v, child) {
+    const list = child ? G.PEOPLE.child : G.PEOPLE.adult;
+    const pm = this.peopleModel(list[(v >> 3) % list.length]);
+    return pm && pm.tex ? pm : null;
+  };
+  R.beginPeople = function () {
+    for (const pm of (this.peopleCache || new Map()).values()) if (pm) pm.count = 0;
+  };
+  R.addPerson = function (pm, m, legA, legB, armA, armB, tint) {
+    const need = (pm.count + 1) * G.INST_FLOATS;
+    if (!pm.data || pm.data.length < need) { const d = new Float32Array(Math.max(64 * G.INST_FLOATS, need * 2)); if (pm.data) d.set(pm.data); pm.data = d; }
+    this.writeInst(pm.data, pm.count++, m, tint || [1, 1, 1, 0], [legA, legB, armA], [armB, 0, 0], [0, 0, 0]);
+  };
+  R.endPeople = function () {
+    for (const pm of (this.peopleCache || new Map()).values()) if (pm && pm.data) G.setInstances(this.gl, pm.mesh, pm.data, pm.count);
+  };
+  R.drawPeople = function (prog) {
+    const gl = this.gl, u = prog.u;
+    if (!u.uPeople || !this.peopleCache) return;
+    gl.uniform1f(u.uPeople, 1);
+    for (const pm of this.peopleCache.values()) {
+      if (!pm || !pm.count || !pm.tex) continue;
+      gl.uniform1f(u.uHip, pm.hip); gl.uniform1f(u.uShoulder, pm.shoulder);
+      if (u.uTex) { gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, pm.tex); }
+      this.drawInst(prog, pm.mesh);
+    }
+    gl.uniform1f(u.uPeople, 0);
+    if (u.uTex) { gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.whiteTex()); }
+  };
+
+  /* ------------------------------------------------------------------
+     Chargement progressif : un script par modèle (js/models/<id>.js),
+     ajouté à la page à la demande. Fonctionne aussi depuis file://.
+     ------------------------------------------------------------------ */
+  R.requestModel = function (id, done) {
+    if (DZ.MODELS && DZ.MODELS[id]) { if (done) done(); return true; }
+    if (!DZ.MODEL_FILES || DZ.MODEL_FILES.indexOf(id) < 0) { if (done) done(); return false; }
+    this._loading = this._loading || {};
+    const L = this._loading[id];
+    if (L) { if (done) L.push(done); return false; }
+    const cbs = this._loading[id] = done ? [done] : [];
+    const sc = document.createElement('script');
+    sc.src = 'js/models/' + id + '.js';
+    sc.onload = sc.onerror = () => {
+      if (this.skinCache) this.skinCache.delete(id);
+      cbs.forEach((f) => f());
+    };
+    document.head.appendChild(sc);
+    return false;
+  };
+  /* Après le démarrage : visiteurs d'abord, puis espèces du parc, puis les autres. */
+  R.preloadModels = function () {
+    if (!DZ.MODEL_FILES) return;
+    const present = new Set(this.game.dinos.map((d) => d.sp));
+    const list = DZ.MODEL_FILES.slice().sort((a, b) => (b.startsWith('v_') - a.startsWith('v_')) || (present.has(b) - present.has(a)));
+    const next = () => {
+      const id = list.shift();
+      if (!id) return;
+      this.requestModel(id, () => setTimeout(next, 100));
+    };
+    next(); next(); next(); // trois téléchargements à la fois
+  };
+  /* Vignettes de la boutique : redessinées quand le modèle est prêt. */
+  R.refreshThumbs = function (id) {
+    const ui = DZ.app && DZ.app.ui;
+    if (!ui || !ui.thumbs) return;
+    for (const k of Object.keys(ui.thumbs)) if (k === 'd_' + id || k.startsWith('p_' + id)) delete ui.thumbs[k];
+    if (ui.tab === 'dinos' && ui.buildItems) { clearTimeout(this._thT); this._thT = setTimeout(() => ui.buildItems(), 250); }
   };
 
   /* Texture blanche par défaut sur l'unité 2 (aucun conflit de type d'échantillonneur). */

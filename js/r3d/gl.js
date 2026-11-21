@@ -127,7 +127,7 @@ DZ.G = DZ.G || {};
   const LIT_VS = (inst) => `#version 300 es
     precision highp float;
     in vec3 aPos; in vec3 aNor; in vec4 aCol;
-    ${inst ? 'in vec4 iM0; in vec4 iM1; in vec4 iM2; in vec4 iM3; in vec4 iTint; in vec3 iS1; in vec3 iS2; in vec3 iS3;' : 'in vec2 aUV; in vec4 aJ; in vec4 aW; uniform mat4 uBones[32]; uniform float uSkin;'}
+    ${inst ? 'in vec4 iM0; in vec4 iM1; in vec4 iM2; in vec4 iM3; in vec4 iTint; in vec3 iS1; in vec3 iS2; in vec3 iS3; in vec2 aUV; in vec4 aW; uniform float uPeople, uHip, uShoulder;' : 'in vec2 aUV; in vec4 aJ; in vec4 aW; uniform mat4 uBones[32]; uniform float uSkin;'}
     uniform mat4 uModel, uVP, uLightVP;
     uniform float uTime, uWind;
     out vec3 vPos; out vec3 vNor; out vec4 vCol; out vec3 vLocal; out vec4 vLight; out vec2 vUv;
@@ -149,8 +149,32 @@ DZ.G = DZ.G || {};
       if (uSkin > 0.5) Mo = uModel * (uBones[int(aJ.x)] * aW.x + uBones[int(aJ.y)] * aW.y + uBones[int(aJ.z)] * aW.z + uBones[int(aJ.w)] * aW.w);
       vUv = aUV;
       `}
-      ${inst ? 'vUv = vec2(0.0);' : ''}
+      ${inst ? 'vUv = aUV;' : ''}
       vec3 p = aPos;
+      vec3 nrm = aNor;
+      ${inst ? `
+      // visiteurs réalistes : jambes pliées à la hanche, bras balancés à l'épaule
+      // (angles par instance dans iS1/iS2, poids par sommet dans aW)
+      if (uPeople > 0.5) {
+        float a1 = aW.x * iS1.x + aW.y * iS1.y;
+        float a2 = aW.z * iS1.z + aW.w * iS2.x;
+        // bras ramenés le long du corps (le modèle est en pose A)
+        float a0 = (aW.w - aW.z) * 0.55;
+        float c = cos(a0), s = sin(a0);
+        float sx = sign(p.x) * uShoulder * 0.16;
+        vec2 r0 = vec2(p.x - sx, p.y - uShoulder);
+        p.xy = vec2(sx + r0.x * c - r0.y * s, uShoulder + r0.x * s + r0.y * c);
+        nrm.xy = vec2(nrm.x * c - nrm.y * s, nrm.x * s + nrm.y * c);
+        c = cos(a1); s = sin(a1);
+        vec2 q = vec2(p.y - uHip, p.z);
+        p.yz = vec2(uHip + q.x * c - q.y * s, q.x * s + q.y * c);
+        nrm.yz = vec2(nrm.y * c - nrm.z * s, nrm.y * s + nrm.z * c);
+        c = cos(a2); s = sin(a2);
+        q = vec2(p.y - uShoulder, p.z);
+        p.yz = vec2(uShoulder + q.x * c - q.y * s, q.x * s + q.y * c);
+        nrm.yz = vec2(nrm.y * c - nrm.z * s, nrm.y * s + nrm.z * c);
+        col = iTint.rgb;
+      }` : ''}
       if (mat == 7.0) {
         float h = max(p.y, 0.0);
         float w = uWind * h * h;
@@ -159,7 +183,7 @@ DZ.G = DZ.G || {};
       }
       vec4 wp = Mo * vec4(p, 1.0);
       vPos = wp.xyz;
-      vNor = mat3(Mo) * aNor;
+      vNor = mat3(Mo) * nrm;
       vCol = vec4(col, mat);
       vLocal = aPos;
       vLight = uLightVP * wp;

@@ -523,6 +523,7 @@
       const root = M4.create();
       const seedT = t + d.id * 3.1;
       const kAge = this.game.dinoScale ? this.game.dinoScale(d) : 1;
+      const skinStart0 = out.length;
       if (sp.habitat === 'air') {
         const alt = 0.75 + (d.alt - 18) / 22 * 0.55;
         if (lift) gy += (hangTop - 0.25 - alt - gy) * lift;
@@ -532,6 +533,7 @@
         const hd = M4.copy(root); M4.translate(hd, rig.bl * 0.45, 0, 0); M4.rotY(hd, Math.sin(t * 0.8 + d.id) * 0.25); out.push([rig.head, hd]);
         const w1 = M4.copy(root); M4.rotX(w1, -flap); out.push([rig.wing, w1]);
         const w2 = M4.copy(root); M4.scale(w2, 1, 1, -1); M4.rotX(w2, -flap); out.push([rig.wing, w2]);
+        this.skinSwap(d, out, skinStart0);
         return { x, y: gy + alt, z, r: rig.span * 0.6, h: 0.2, shadowY: gy };
       }
       if (sp.habitat === 'water') {
@@ -560,6 +562,7 @@
             M4.translate(m, -rig.segs[i].len, 0, 0);
           }
         }
+        this.skinSwap(d, out, skinStart0);
         return { x, y, z, r: rig.len * 0.5, h: 0.1, underwater: !lift, lifted: lift };
       }
       // --- terrestres ---
@@ -806,6 +809,7 @@
       if (!this.pBody || this.pBody.length < n * G.INST_FLOATS) { this.pBody = new Float32Array(Math.max(64, n * 1.5) * G.INST_FLOATS | 0); this.pLeg = new Float32Array(this.pBody.length * 2); }
       const m = M4.create(), lm = M4.create();
       let bi = 0, li = 0;
+      this.beginPeople();
       const vr = this.cam.dist * 1.8 + 6;
       for (const grp of g.visitors) {
         if (grp.hidden) continue;
@@ -825,6 +829,8 @@
           const ph = grp.wd * 9 + mem.ph;
           const bob = moving ? Math.abs(Math.sin(ph)) * 0.01 * sc : 0;
           M4.ident(m); M4.translate(m, x, gy + bob, z); M4.rotY(m, ang); M4.scale(m, sc, sc, sc);
+          const pm = this.personVariant(v, mem.child);
+          if (pm) { const sw = moving ? Math.sin(ph) : 0; this.addPerson(pm, m, sw * 0.55, -sw * 0.55, -sw * 0.35, sw * 0.35, this.personTint(v)); continue; }
           const skin = SKIN[v % SKIN.length], shirt = SHIRT[(v >> 2) % SHIRT.length], pants = PANTS[(v >> 4) % PANTS.length], hair = HAIR[(v >> 5) % HAIR.length];
           this.writeInst(this.pBody, bi++, m, [hair[0], hair[1], hair[2], 0], shirt, pants, skin);
           for (const s of [-1, 1]) {
@@ -843,6 +849,13 @@
           if (q.swing) M4.rotX(m, q.swing);
           M4.scale(m, sc, sc, sc);
           const sit = q.pose === 'sit';
+          const pm = this.personVariant(v, true);
+          if (pm) {
+            const ph2 = t * 9 + e.slot * 2, sw = Math.sin(ph2);
+            const la = sit ? -1.45 : q.pose === 'climb' ? sw * 0.5 - 0.4 : sw * 0.55, lb = sit ? -1.45 : q.pose === 'climb' ? -sw * 0.5 - 0.4 : -sw * 0.55;
+            this.addPerson(pm, m, la, lb, sit ? -0.5 : q.pose === 'climb' ? -1.2 : -sw * 0.35, sit ? -0.5 : q.pose === 'climb' ? -1.2 : sw * 0.35, this.personTint(v));
+            continue;
+          }
           if (sit) M4.translate(m, 0, -0.15, -0.02);
           const skin = SKIN[v % SKIN.length], shirt = SHIRT[(v >> 2) % SHIRT.length], pants = PANTS[(v >> 4) % PANTS.length], hair = HAIR[(v >> 5) % HAIR.length];
           this.writeInst(this.pBody, bi++, m, [hair[0], hair[1], hair[2], 0], shirt, pants, skin);
@@ -856,6 +869,7 @@
       }
       G.setInstances(gl, this.personBody, this.pBody, bi);
       G.setInstances(gl, this.personLeg, this.pLeg, li);
+      this.endPeople();
     }
 
     /* ------------------------------------------------------------------
@@ -942,6 +956,7 @@
         this.setCommon(this.P.depthInst, Lt, this.mLight);
         for (const v of vis) if (v.tdist < half + 12) this.drawTrees(this.P.depthInst, v.data, v.near);
         this.drawInst(this.P.depthInst, this.personBody);
+        this.drawPeople(this.P.depthInst);
         gl.disable(gl.POLYGON_OFFSET_FILL);
       }
 
@@ -974,6 +989,7 @@
       }
       this.drawInst(li, this.personBody);
       this.drawInst(li, this.personLeg);
+      this.drawPeople(li);
       // eau
       gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(false);

@@ -2,24 +2,36 @@
 
 Décisions prises pendant le développement, là où la demande était ambiguë ou muette.
 
-## Modèles réalistes générés avec Meshy (test)
+## Modèles réalistes générés avec Meshy
 
-- Pour un rendu plus réaliste, une espèce peut recevoir un vrai modèle 3D texturé, généré avec Meshy. Premier essai sur les trois dinosaures les moins chers : Compsognathus, Dryosaurus et Psittacosaurus.
-- Le jeu doit tourner depuis file:// sans bibliothèque. Le modèle .glb est donc converti en script par `tools/glb2js.mjs` :
+- Pour un rendu plus réaliste, chaque espèce et les visiteurs ont un vrai modèle 3D texturé, généré avec Meshy :
+  - les 20 espèces ;
+  - 6 silhouettes de visiteurs : homme, femme, senior, jeune femme, garçon, fille.
+- Les reptiles marins ont demandé plus d'essais :
+  - Mosasaure : réussi au deuxième essai, avec une description qui insiste sur un corps de requin, des nageoires et l'absence de pattes.
+  - Plésiosaure : à partir d'une description, Meshy lui donnait toujours des pattes. Il a fallu générer d'abord une image de référence de profil (text-to-image), puis le modèle 3D à partir de cette image (image-to-3d). C'est la méthode à retenir quand la description seule échoue.
+- Le jeu doit tourner depuis file:// sans bibliothèque. Chaque .glb est donc converti en script par `tools/glb2js.mjs` :
   - positions et UV sur 16 bits, normales sur 8 bits ;
-  - texture réduite en JPEG 1024 px ;
-  - environ 700 Ko par espèce.
-- Les fichiers .glb bruts restent dans `meshy_output/`, qui n'est pas versionné.
-- L'animation de Meshy ne gère que les humanoïdes. Le modèle est donc attaché au pantin procédural déjà animé (`js/r3d/skin3d.js`) :
-  - chaque pièce du pantin (corps, queue, cou, tête, mâchoire, cuisses, jambes, pieds, bras) devient un os ;
-  - le modèle est ajusté sur la silhouette du pantin au repos, et chaque sommet suit les 4 pièces les plus proches, avec des poids lissés ;
-  - toutes les animations existantes s'appliquent sans changement : marche, repos, repas, cri, combat, transport, bébés.
-- Le calcul se fait au premier affichage de l'espèce (environ 25 ms). Le shader fait le reste : jusqu'à 32 os, matériau 14 « peau texturée ».
-- Tant que la texture n'est pas chargée, ou pour une espèce sans modèle, c'est le pantin procédural qui s'affiche.
-- Pour ajouter une espèce :
-  1. générer le .glb (Meshy text-to-3d, environ 6 000 triangles, texture 2k) ;
-  2. lancer `node tools/glb2js.mjs --id <espèce> --in <fichier.glb>` (option `--yaw` si la tête n'est pas tournée vers +X) ;
-  3. ajouter la balise `<script>` dans `index.html`.
+  - textures JPEG de 1024 px pour les dinosaures et de 512 px pour les visiteurs.
+- Le convertisseur met aussi à jour `js/models/index.js`, la liste des modèles disponibles. Les .glb bruts restent dans `meshy_output/`, qui n'est pas versionné.
+- **Chargement progressif** : les modèles (environ 14 Mo au total) ne sont pas dans la page.
+  - Après le démarrage, un script par modèle est ajouté à la page, trois à la fois : visiteurs d'abord, puis espèces présentes dans le parc, puis les autres.
+  - Tant qu'un modèle n'est pas prêt, le pantin ou le visiteur procédural s'affiche.
+  - Les vignettes de la boutique sont redessinées quand le modèle arrive.
+- **Dinosaures** (`js/r3d/skin3d.js`) : Meshy n'anime que les humanoïdes, donc le modèle est attaché au pantin procédural déjà animé.
+  - Chaque pièce du pantin devient un os.
+  - Le modèle est ajusté sur la silhouette du pantin au repos. La hauteur peut varier de −15 % à +25 % par rapport à la longueur, pour ne pas écraser un modèle.
+  - Volants : ajustement sans déformation, sur la longueur et l'envergure.
+  - Chaque sommet suit les 4 pièces les plus proches, avec des poids lissés.
+  - Toutes les animations existantes s'appliquent : marche, repos, repas, cri, combat, vol, transport, bébés.
+- **Visiteurs** : un modèle par silhouette, dessiné en lot (instances).
+  - Le shader plie les jambes à la hanche (46 % de la taille, 43 % chez l'enfant) et balance les bras à l'épaule.
+  - Il ramène aussi les bras le long du corps : le modèle est en pose A.
+  - Chaque visiteur reçoit une légère variation de teinte, puisque les vêtements de la texture sont fixes.
+  - Aires de jeux : assis, escalade et balançoire utilisent les mêmes angles.
+- Pour ajouter ou remplacer un modèle :
+  1. générer le .glb : Meshy text-to-3d, environ 6 000 triangles pour un dinosaure, 2 000 pour un visiteur (pose A), texture 2k ;
+  2. lancer `node tools/glb2js.mjs --id <id> --in <fichier.glb>`. Ajouter `--yaw 0 --tex 512` pour un visiteur, et `--yaw` si la tête d'un dinosaure n'est pas tournée vers +X.
 
 ## Évasions et fin de partie
 
