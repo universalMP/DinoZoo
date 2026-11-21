@@ -244,6 +244,57 @@
   };
 
   /* ------------------------------------------------------------------
+     Végétation réaliste : un modèle Meshy par sorte de plante, dessiné en
+     lot à la place de la version détaillée procédurale (la version
+     simplifiée reste pour les arbres lointains).
+     ------------------------------------------------------------------ */
+  G.PLANTS = { araucaria: 't_araucaria', palmier: 't_palmier', cycas: 't_cycas', fougere: 't_fougere', ginkgo: 't_ginkgo', buisson: 't_fougere', /* le buisson Meshy était raté : touffe de feuilles de la fougère */ arbremort: 't_arbremort' };
+  R.plantModel = function (kind) {
+    const id = G.PLANTS[kind];
+    if (!id || this.noModels) return null;
+    this.plantCache = this.plantCache || new Map();
+    if (this.plantCache.has(kind)) { const pm = this.plantCache.get(kind); return pm && pm.tex ? pm : null; }
+    const M = DZ.MODELS && DZ.MODELS[id];
+    if (!M) { this.requestModel(id); return null; }
+    let pm = null;
+    try { pm = this.buildPlant(kind, M); } catch (e) { console.warn('Plante ' + kind + ' ignorée :', e); }
+    this.plantCache.set(kind, pm);
+    return null; // prête quand sa texture est chargée
+  };
+  R.buildPlant = function (kind, M) {
+    const gl = this.gl, n = M.n;
+    const qp = dec(M.pos, Uint16Array), qn = dec(M.nor, Int8Array), qt = dec(M.uv, Uint16Array);
+    const idx = M.wide ? dec(M.idx, Uint32Array) : dec(M.idx, Uint16Array);
+    const info = this.treeMesh(kind, 0).info; // même hauteur que la plante procédurale
+    const k = info.h / M.hi[1];
+    const verts = new Float32Array(n * 20);
+    let r = 0;
+    for (let i = 0; i < n; i++) {
+      const o = i * 20;
+      const x = (M.lo[0] + qp[i * 3] / 65535 * (M.hi[0] - M.lo[0])) * k, y = qp[i * 3 + 1] / 65535 * M.hi[1] * k, z = (M.lo[2] + qp[i * 3 + 2] / 65535 * (M.hi[2] - M.lo[2])) * k;
+      verts[o] = x; verts[o + 1] = y; verts[o + 2] = z;
+      verts[o + 3] = qn[i * 4] / 127; verts[o + 4] = qn[i * 4 + 1] / 127; verts[o + 5] = qn[i * 4 + 2] / 127;
+      verts[o + 6] = 1; verts[o + 7] = 1; verts[o + 8] = 1; verts[o + 9] = 15 / 15;
+      verts[o + 10] = qt[i * 2] / 65535; verts[o + 11] = qt[i * 2 + 1] / 65535;
+      r = Math.max(r, Math.hypot(x, z));
+    }
+    const mesh = G.uploadSkin(gl, { verts, idx: Uint32Array.from(idx), bounds: { x0: -r, y0: 0, z0: -r, x1: r, y1: info.h, z1: r } });
+    mesh.info = info;
+    const pm = { mesh, tex: null };
+    if (M.tex) {
+      const img = new Image();
+      img.onload = () => {
+        pm.tex = mesh.tex = G.texture(gl, img);
+        // les forêts sont redessinées avec la nouvelle plante (une seule fois, groupé)
+        clearTimeout(this._plantT);
+        this._plantT = setTimeout(() => { this.world.markDirty(null); this._dirtyWorld = true; }, 400);
+      };
+      img.src = M.tex;
+    }
+    return pm;
+  };
+
+  /* ------------------------------------------------------------------
      Chargement progressif : un script par modèle (js/models/<id>.js),
      ajouté à la page à la demande. Fonctionne aussi depuis file://.
      ------------------------------------------------------------------ */
@@ -267,7 +318,8 @@
   R.preloadModels = function () {
     if (!DZ.MODEL_FILES) return;
     const present = new Set(this.game.dinos.map((d) => d.sp));
-    const list = DZ.MODEL_FILES.slice().sort((a, b) => (b.startsWith('v_') - a.startsWith('v_')) || (present.has(b) - present.has(a)));
+    const first = (id) => id.startsWith('t_') ? 2 : id.startsWith('v_') ? 1 : 0; // plantes, visiteurs, puis dinosaures
+    const list = DZ.MODEL_FILES.slice().sort((a, b) => (first(b) - first(a)) || (present.has(b) - present.has(a)));
     const next = () => {
       const id = list.shift();
       if (!id) return;

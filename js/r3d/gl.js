@@ -175,7 +175,7 @@ DZ.G = DZ.G || {};
         nrm.yz = vec2(nrm.y * c - nrm.z * s, nrm.y * s + nrm.z * c);
         col = iTint.rgb;
       }` : ''}
-      if (mat == 7.0) {
+      if (mat == 7.0 || mat == 15.0) {
         float h = max(p.y, 0.0);
         float w = uWind * h * h;
         p.x += sin(uTime * 1.3 + phase + Mo[3].x * 0.7 + p.y * 2.0) * 0.06 * w;
@@ -222,9 +222,9 @@ DZ.G = DZ.G || {};
       if (dot(N, Vv) < 0.0) N = -N;
       float spec = 0.0, shin = 24.0, emis = 0.0;
       if (mat == 13.0) { col = texture(uAtlas, vCol.rg).rgb; emis = uNight * 0.5; }
-      else if (mat == 14.0) { // peau texturée (modèles Meshy)
+      else if (mat == 14.0 || mat == 15.0) { // modèles Meshy texturés (15 : végétation, balancée par le vent)
         col *= texture(uTex, vUv).rgb;
-        spec = 0.16; shin = 22.0;
+        spec = mat == 15.0 ? 0.04 : 0.16; shin = 22.0;
       }
       else if (mat == 1.0) { // peau écailleuse
         vec3 q = vLocal * 26.0;
@@ -233,33 +233,49 @@ DZ.G = DZ.G || {};
         col *= 0.82 + 0.3 * sc - 0.12 * smoothstep(0.55, 0.85, cell);
         col *= 0.9 + 0.2 * fbm(vLocal * 5.0);
         spec = 0.22; shin = 18.0;
-      } else if (mat == 2.0) { // sol
-        float n1 = fbm(vPos * vec3(0.9, 0.0, 0.9));
-        float n2 = vnoise(vPos * 7.0);
-        float n3 = vnoise(vPos * 23.0);
-        col *= 0.78 + 0.38 * n1;
-        col *= 0.9 + 0.2 * n2;
-        col = mix(col, col * vec3(1.15, 1.1, 0.75), smoothstep(0.7, 0.95, n3) * 0.5);
-        col *= 0.93 + 0.12 * step(0.82, vnoise(vPos * 41.0));
-      } else if (mat == 3.0) { // pavés irréguliers (cellules de Voronoï)
+      } else if (mat == 2.0) { // sol : herbe, terre, cailloux
+        float dcam = length(uCam - vPos);
+        float fine = 1.0 - smoothstep(6.0, 24.0, dcam); // détails fins près de la caméra
+        vec3 q = vPos * vec3(1.0, 0.0, 1.0);
+        float n1 = fbm(q * 0.45), n2 = fbm(q * 2.3 + 3.1), n3 = vnoise(q * 9.0), n4 = vnoise(q * 31.0);
+        col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, 0.82); // teintes naturelles, moins saturées
+        col *= 0.8 + 0.34 * n1;
+        col = mix(col, col * vec3(1.2, 1.08, 0.7), smoothstep(0.55, 0.8, n2) * 0.45); // herbe sèche
+        col = mix(col, col * vec3(0.78, 0.88, 0.7), smoothstep(0.62, 0.85, 1.0 - n2) * 0.35); // herbe dense
+        col *= 0.9 + 0.2 * n3;
+        float blades = vnoise(q * 38.0 + vec3(vnoise(q * 5.0) * 2.0)) * 0.6 + vnoise(q * 83.0) * 0.4;
+        col *= 1.0 + (blades - 0.5) * 0.26 * fine; // grain des brins d'herbe
+        col *= 0.94 + 0.12 * n4 * fine;
+        col = mix(col, vec3(0.6, 0.56, 0.48) * (0.85 + 0.3 * n4), step(0.935, vnoise(q * 47.0)) * 0.55 * fine); // cailloux
+        col = mix(col, vec3(0.45, 0.43, 0.39) * (0.8 + 0.3 * n3), smoothstep(0.84, 0.62, N.y) * 0.8); // la roche affleure dans les pentes
+        spec = 0.03;
+      } else if (mat == 3.0) { // dallage de pierres irrégulières (cellules de Voronoï), biseautées
         vec2 p = vPos.xz * 3.4 + vec2(vnoise(vPos * 1.7), vnoise(vPos * 1.9 + 7.0)) * 0.35;
         vec2 ip = floor(p), fp = fract(p);
-        float d1 = 8.0, d2 = 8.0; vec2 id = ip;
+        float d1 = 8.0, d2 = 8.0; vec2 id = ip, r1 = vec2(0.0);
         for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
           vec2 gg = vec2(float(i), float(j));
           vec2 o = vec2(hash3(vec3(ip + gg, 1.0)), hash3(vec3(ip + gg, 2.0))) * 0.85 + 0.075;
           vec2 rr = gg + o - fp;
           float dd = dot(rr, rr);
-          if (dd < d1) { d2 = d1; d1 = dd; id = ip + gg; } else if (dd < d2) d2 = dd;
+          if (dd < d1) { d2 = d1; d1 = dd; id = ip + gg; r1 = rr; } else if (dd < d2) d2 = dd;
         }
         float edge = sqrt(d2) - sqrt(d1);
-        col *= 0.82 + 0.3 * hash3(vec3(id, 3.0));
-        col *= 0.88 + 0.2 * vnoise(vPos * 11.0);
-        col = mix(col * vec3(0.55, 0.57, 0.48), col, smoothstep(0.035, 0.11, edge));
-        spec = 0.07;
-      } else if (mat == 4.0) { // bois
+        float hue = hash3(vec3(id, 3.0));
+        col *= 0.8 + 0.32 * hue;
+        col = mix(col, col * vec3(1.06, 1.0, 0.9), step(0.7, hash3(vec3(id, 5.0))) * 0.5); // quelques pierres plus chaudes
+        col *= 0.86 + 0.2 * vnoise(vPos * 11.0) + 0.06 * vnoise(vPos * 40.0);
+        float bev = 1.0 - smoothstep(0.04, 0.16, edge);
+        N = normalize(N + vec3(-r1.x, 0.0, -r1.y) * bev * 1.4); // biseau : la pierre s'arrondit vers le joint
+        vec3 grout = mix(vec3(0.33, 0.29, 0.22), vec3(0.32, 0.4, 0.2), smoothstep(0.55, 0.75, vnoise(vPos * 6.0))); // terre ou mousse dans les joints
+        col = mix(grout * (0.8 + 0.3 * vnoise(vPos * 25.0)), col, smoothstep(0.03, 0.08, edge));
+        spec = 0.08;
+      } else if (mat == 4.0) { // bois : planches, veines, usure
+        float plank = hash3(vec3(floor(vLocal.y * 9.0), floor((vLocal.x + vLocal.z) * 2.0), 7.0));
         float s = sin((vLocal.x + vLocal.z) * 60.0 + vnoise(vLocal * 9.0) * 6.0);
-        col *= 0.85 + 0.12 * s + 0.1 * vnoise(vLocal * 30.0);
+        col *= 0.8 + 0.12 * s + 0.1 * vnoise(vLocal * 30.0) + 0.14 * plank;
+        col = mix(col, vec3(dot(col, vec3(0.33))) * vec3(1.0, 0.97, 0.92), 0.22 + 0.2 * vnoise(vLocal * 4.0)); // bois grisé par les intempéries
+        spec = 0.04;
       } else if (mat == 5.0) { // vitre éclairée la nuit
         emis = uNight * 1.3; spec = 0.6; shin = 60.0;
       } else if (mat == 6.0) { // métal
@@ -267,11 +283,22 @@ DZ.G = DZ.G || {};
       } else if (mat == 7.0) { // feuillage
         col *= 0.72 + 0.5 * vnoise(vLocal * 14.0 + vPos * 0.5);
         spec = 0.05;
-      } else if (mat == 8.0) { // roche
-        float n = fbm(vLocal * 4.0 + vPos * 0.3);
-        col *= 0.7 + 0.5 * n;
-        col *= 1.0 - 0.25 * smoothstep(0.45, 0.5, abs(fract(n * 6.0) - 0.5));
-        col = mix(col, vec3(0.42, 0.5, 0.26), smoothstep(0.55, 0.9, N.y) * smoothstep(0.6, 0.75, vnoise(vLocal * 6.0)) * 0.6);
+      } else if (mat == 8.0) { // roche : strates, fissures, mousse et lichen
+        vec3 wp = vPos * 3.0 + vLocal * 1.5;
+        float n = fbm(wp);
+        float strata = sin(vPos.y * 9.0 + n * 4.0) * 0.5 + 0.5;
+        strata = mix(0.5, strata, 0.5);
+        float crack = (1.0 - smoothstep(0.0, 0.025, abs(vnoise(wp * 2.2) - 0.5))) * smoothstep(0.6, 0.8, vnoise(wp * 0.7 + 5.0)); // quelques fissures, pas des lignes de niveau
+        col *= 0.66 + 0.48 * n;
+        col *= 0.9 + 0.14 * strata;
+        col *= 1.0 - 0.38 * crack;
+        float moss = smoothstep(0.5, 0.95, N.y) * smoothstep(0.42, 0.68, vnoise(wp * 0.8));
+        col = mix(col, vec3(0.31, 0.39, 0.19) * (0.8 + 0.4 * n), moss * 0.75);
+        col = mix(col, vec3(0.72, 0.68, 0.48), step(0.86, vnoise(wp * 5.0)) * 0.25 * (1.0 - moss)); // lichen clair
+        vec3 w4 = wp * 4.0;
+        vec3 gr = vec3(vnoise(w4 + vec3(0.1, 0.0, 0.0)) - vnoise(w4 - vec3(0.1, 0.0, 0.0)), vnoise(w4 + vec3(0.0, 0.1, 0.0)) - vnoise(w4 - vec3(0.0, 0.1, 0.0)), vnoise(w4 + vec3(0.0, 0.0, 0.1)) - vnoise(w4 - vec3(0.0, 0.0, 0.1)));
+        N = normalize(N - gr * 1.6); // relief de la pierre
+        spec = 0.06; shin = 12.0;
       } else if (mat == 9.0) { // émissif (lampes, flammes)
         emis = 0.6 + uNight * 1.6;
       } else if (mat == 10.0) { // œil
@@ -523,10 +550,11 @@ DZ.G = DZ.G || {};
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
-    const stride = 10 * 4;
+    const stride = (mesh.skin ? 20 : 10) * 4; // maillage texturé : uv en plus
     gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
     gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 12);
     gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, stride, 24);
+    if (mesh.skin) { gl.enableVertexAttribArray(11); gl.vertexAttribPointer(11, 2, gl.FLOAT, false, stride, 40); }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ibo);
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     const st = INST_FLOATS * 4;

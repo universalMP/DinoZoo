@@ -119,8 +119,9 @@
     rock(r, seed, flat) {
       const rnd = U.rng(seed);
       const bumps = [];
-      for (let i = 0; i < 7; i++) bumps.push([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1, 0.15 + rnd() * 0.25]);
-      const seg = 12, rings = 8;
+      for (let i = 0; i < 10; i++) bumps.push([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1, 0.12 + rnd() * 0.28]);
+      const seg = 14, rings = 9;
+      const top = 0.45 + rnd() * 0.25; // bloc érodé : sommet aplati
       const base = this.v.length / 10;
       const pts = [];
       for (let j = 0; j <= rings; j++) {
@@ -131,7 +132,8 @@
           let d = 1;
           for (const b of bumps) d += b[3] * Math.max(0, nx * b[0] + ny * b[1] + nz * b[2]) ** 3;
           d *= 0.92 + U.hash(j, k % seg, seed) * 0.16;
-          const y = ny < -0.2 ? -0.2 : ny;
+          let y = ny < -0.2 ? -0.2 : ny;
+          if (y > top) y = top + (y - top) * 0.35;
           pts.push([nx * r * d, Math.max(y * r * d * (flat || 0.7), -0.05), nz * r * d]);
         }
       }

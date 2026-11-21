@@ -709,25 +709,9 @@
   }
 
     /* Décor intérieur des enclos (rochers et arbres), déterministe. */
-  G.enclosureDecor = function (b, gates) {
-    const def = C.buildings[b.type], lv = b.level;
-    const r = U.rng(b.seed + lv * 7);
-    const area = b.w * b.h, out = [];
-    const sh = DZ.encShape(b);
-    const free = (p) => !gates || !gates.some((g) => p.x > g.x0 - 0.6 && p.x < g.x1 + 0.6 && p.z > g.y0 - 0.6 && p.z < g.y1 + 0.6);
-    const inside = () => { for (let k = 0; k < 30; k++) { const p = { x: b.x + 0.7 + r() * (b.w - 1.4), z: b.y + 0.7 + r() * (b.h - 1.3) }; if (DZ.encSDF(b, p.x, p.z, sh) < -0.9 && free(p)) return p; } return { x: sh.cx, z: sh.cy }; };
-    if (def.kind === 'land') {
-      const rocks = Math.round(area / 9) + (lv >= 2 ? 1 : 0);
-      for (let i = 0; i < rocks; i++) { const p = inside(); out.push({ t: 'rock', x: p.x, z: p.z, size: r() < 0.3 && area > 12 ? 'L' : r() < 0.6 ? 'M' : 'S', sd: (r() * 1000) | 0 }); }
-      const n = Math.round(area / 10) + (lv === 3 ? 2 : lv === 2 ? 1 : 0);
-      const kinds = lv === 1 ? ['fougere', 'buisson', 'cycas'] : ['fougere', 'cycas', 'palmier', 'araucaria', 'ginkgo', 'buisson'];
-      for (let i = 0; i < n; i++) { const p = inside(); out.push({ t: 'tree', k: area < 10 ? U.pick(r, ['fougere', 'buisson', 'cycas']) : U.pick(r, kinds), x: p.x, z: p.z, sd: (r() * 1e6) | 0, sc: 0.8 + r() * 0.3 }); }
-    } else if (def.kind === 'air') {
-      for (let i = 0; i < 2 + lv; i++) { const p = inside(); out.push({ t: 'tree', k: i % 2 ? 'arbremort' : 'palmier', x: p.x, z: p.z, sd: (r() * 1e6) | 0, sc: 0.9 + r() * 0.3 }); }
-      for (let i = 0; i < 2; i++) { const p = inside(); out.push({ t: 'rock', x: p.x, z: p.z, size: 'M', sd: (r() * 1000) | 0 }); }
-    }
-    return out;
-  };
+  /* Décor intérieur des enclos : tiré au sort par la logique du jeu (js/obstacles.js),
+     qui s'en sert aussi pour les collisions. */
+  G.enclosureDecor = (b, gates) => DZ.enclosureDecor(b, gates);
 
   /* ------------------------------------------------------------------
      Visiteurs : corps (torse + tête + bras) et jambe, instanciés.

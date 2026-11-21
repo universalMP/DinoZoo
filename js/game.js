@@ -1116,10 +1116,12 @@ window.DZ = window.DZ || {};
     }
     /* Destination d'une promenade : atteignable en ligne droite sans traverser la clôture. */
     walkGoal(b, d) {
-      if (!b.parts) return this.randomPointIn(b, d.sp);
       const sh = DZ.encShape(b), m = this.shapeMargin(b, DZ.SPECIES[d.sp]) * 0.7;
-      for (let k = 0; k < 14; k++) { const p = this.randomPointIn(b, d.sp); if (this.segmentInside(b, d.x, d.y, p.x, p.y, m, sh)) return p; }
-      for (let k = 0; k < 10; k++) { const p = this.pointNear(b, DZ.SPECIES[d.sp], d.x, d.y, 3); if (p && this.segmentInside(b, d.x, d.y, p.x, p.y, m, sh)) return p; }
+      // trajet dans la clôture (enclos agrandi) et sans obstacle (rochers, arbres, passerelles)
+      const ok = (p) => (!b.parts || this.segmentInside(b, d.x, d.y, p.x, p.y, m, sh)) && (!this.pathClear || this.pathClear(b, d, d.x, d.y, p.x, p.y));
+      for (let k = 0; k < 16; k++) { const p = this.randomPointIn(b, d.sp); if (ok(p)) return p; }
+      for (let k = 0; k < 10; k++) { const p = this.pointNear(b, DZ.SPECIES[d.sp], d.x, d.y, 3); if (p && ok(p)) return p; }
+      if (!b.parts) return this.randomPointIn(b, d.sp);
       return { x: d.x, y: d.y };
     }
     /* Point au hasard dans un rayon donné (pour les rapprochements et les fuites). */
@@ -1188,6 +1190,8 @@ window.DZ = window.DZ || {};
         else if (sp.habitat === 'water') this._updateSwimmer(d, b, sp, dt);
         else this._updateWalker(d, b, sp, dt);
       }
+      // personne ne traverse un autre dinosaure ni le décor de l'enclos
+      if (this._dinoCollisions) this._dinoCollisions(dt);
       // enclos agrandis (formes à coins rentrants) : personne ne traverse la clôture,
       // même en se battant ou en chassant
       let shapes = null;

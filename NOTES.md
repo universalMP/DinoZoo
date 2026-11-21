@@ -33,6 +33,30 @@ Décisions prises pendant le développement, là où la demande était ambiguë 
   1. générer le .glb : Meshy text-to-3d, environ 6 000 triangles pour un dinosaure, 2 000 pour un visiteur (pose A), texture 2k ;
   2. lancer `node tools/glb2js.mjs --id <id> --in <fichier.glb>`. Ajouter `--yaw 0 --tex 512` pour un visiteur, et `--yaw` si la tête d'un dinosaure n'est pas tournée vers +X.
 
+## Décor réaliste et collisions
+
+- **Plantes** : les 7 sortes de plantes du décor (forêts, enclos, décor posé par le joueur) utilisent des modèles Meshy légers, de 500 à 1 400 triangles, car elles sont dessinées par milliers.
+  - Ces modèles sont dessinés en lot, avec leur texture, et se balancent au vent (matériau 15).
+  - Au loin, la version simplifiée procédurale reste.
+  - Le buisson Meshy était raté (un bloc beige) : le buisson réutilise la touffe de feuilles de la fougère, plus petite et plus foncée.
+  - Les forêts sont redessinées une fois quand les plantes arrivent.
+  - Elles coûtent moins cher à dessiner que les anciennes plantes, faites de boules empilées : au-dessus d'une forêt dense, 31 images/s au lieu de 19 à 20.
+- **Shader** :
+  - sol : plaques d'herbe sèche et dense, grain d'herbe et cailloux de près, roche qui affleure dans les pentes, teintes moins saturées ;
+  - rochers : strates, rares fissures, mousse et lichen sur le dessus, relief simulé, et une silhouette de bloc érodé au sommet aplati ;
+  - chemins : pierres biseautées, terre ou mousse dans les joints ;
+  - bois : planches et bois grisé par les intempéries.
+- **Collisions** (`js/obstacles.js`, logique pure) :
+  - Chaque dinosaure est représenté par trois cercles le long de sa direction (avant, milieu, arrière), dont la taille dépend de sa longueur.
+  - Les dinosaures qui se chevauchent sont séparés ; le plus lourd bouge moins.
+  - Deux adversaires d'un même combat, ou une chasse en cours, peuvent se toucher.
+  - Obstacles : rochers, arbres et plantes de l'enclos, piliers des passerelles d'observation.
+  - Le décor des enclos est désormais tiré au sort par la logique du jeu (`DZ.enclosureDecor`), et le rendu le dessine au même endroit.
+  - Les espèces plus hautes que le dessous du tablier ne passent pas sous une passerelle : Brachiosaure, Diplodocus, Stégosaure, T-Rex, Allosaure.
+  - Les promenades choisissent un but atteignable sans obstacle sur le trajet. Un animal bloqué plus de 1,2 s change de but.
+  - Les évadés, les transferts, les passages par une passerelle d'enclos et les charges contre la clôture ne sont pas concernés.
+  - Test sur 3 minutes simulées, avec 13 dinosaures dans des enclos chargés : aucun dinosaure hors de la clôture, et aucun sur un pilier. Les chevauchements nets disparaissent une fois la dispersion de l'arrivée passée.
+
 ## Évasions et fin de partie
 
 - **Qui s'évade** : n'importe quel dinosaure terrestre adulte, derrière une clôture de niveau 1 ou 2, ou des murs de verre très abîmés (volières et lagons ne sont pas concernés). Risque par animal et par jour, clôture neuve : petit herbivore 0,6 %, moyen 1,2 %, grand 3 % ; ×5 pour un carnivore (un grand carnivore derrière une palissade neuve : 15 % par jour) ; ×0,2 avec une clôture électrifiée ; ×1,8 si l'animal est malheureux ; × l'usure de la clôture (voir ci-dessous). Au plus une évasion par jour dans le parc, à partir du jour 3, entre 9 h 30 et 16 h 30. Le panneau de l'enclos affiche ce risque.

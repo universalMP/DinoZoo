@@ -27,6 +27,8 @@
     try { const c = document.createElement('canvas'); return !!c.getContext('webgl2'); } catch (e) { return false; }
   };
 
+  const PLANT_TINT = { ginkgo: [0.78, 0.82, 0.68], fougere: [0.85, 0.9, 0.82], buisson: [0.66, 0.74, 0.6], _: [0.92, 0.95, 0.9] };
+
   class Renderer3D {
     constructor(canvas, game) {
       this.canvas = canvas;
@@ -383,17 +385,19 @@
       const m = M4.create();
       for (const key in groups) {
         const tg = groups[key];
-        const det = this.treeMesh(tg.kind, tg.v);
+        const plant = this.plantModel(tg.kind); // modèle réaliste (Meshy) quand il est prêt
+        const det = plant ? plant.mesh : this.treeMesh(tg.kind, tg.v);
         const lod = this.treeLodMesh(tg.kind, tg.v);
         const arr = new Float32Array(tg.list.length * G.INST_FLOATS);
         tg.list.forEach((t, i) => {
           const rot = (t[1] % 628) / 100;
           M4.ident(m); M4.translate(m, t[2], w.heightAt(t[2], t[3]), t[3]); M4.rotY(m, rot); M4.scale(m, t[4], t[4], t[4]);
           const v = 0.9 + U.hash(t[1], 3, 4) * 0.2;
-          this.writeInst(arr, i, m, [v, v, v * 0.95, rot * 3]);
+          const pt = plant ? PLANT_TINT[tg.kind] || PLANT_TINT._ : null; // feuillage des modèles réalistes, un peu plus sombre
+          this.writeInst(arr, i, m, pt ? [v * pt[0], v * pt[1], v * pt[2], rot * 3] : [v, v, v * 0.95, rot * 3]);
         });
         const buf = G.instBuffer(gl, arr);
-        data.trees.push({ buf, vaoD: G.instVAO(gl, det, buf), vaoL: G.instVAO(gl, lod, buf), countD: det.count, countL: lod.count, n: tg.list.length });
+        data.trees.push({ buf, vaoD: G.instVAO(gl, det, buf), vaoL: G.instVAO(gl, lod, buf), countD: det.count, countL: lod.count, n: tg.list.length, tex: plant ? plant.tex : null });
       }
       c.cxw = (c.x0 + c.x1) / 2; c.czw = (c.y0 + c.y1) / 2;
       this.cgpu.set(c, data);
@@ -1276,6 +1280,7 @@
       const gl = this.gl;
       gl.uniformMatrix4fv(prog.u.uModel, false, this.ident);
       for (const tg of data.trees) {
+        if (prog.u.uTex) { gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, near && tg.tex ? tg.tex : this.whiteTex()); }
         gl.bindVertexArray(near ? tg.vaoD : tg.vaoL);
         gl.drawElementsInstanced(gl.TRIANGLES, near ? tg.countD : tg.countL, gl.UNSIGNED_INT, 0, tg.n);
       }

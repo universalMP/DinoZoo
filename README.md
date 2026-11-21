@@ -68,6 +68,7 @@ js/habitats.js      passerelles, enclos réunis, combats entre mâles, prédatio
 js/amenities.js     passerelles d'observation, aires de jeux, transferts de dinosaures
 js/escapes.js       évasions, panique, fin de partie
 js/fences.js        état des clôtures, charges des animaux, réparations
+js/obstacles.js     décor des enclos, collisions entre dinosaures et avec le décor
 js/r3d/             rendu 3D WebGL 2 : socle (maths, shaders), maillages, terrain et eau,
                     modèles (bâtiments, arbres, visiteurs), dinosaures articulés, moteur
 js/r3d/skin3d.js    modèles réalistes (Meshy) attachés au squelette des dinosaures
