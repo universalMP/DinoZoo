@@ -384,7 +384,7 @@ window.DZ = window.DZ || {};
       this.count = {};
     }
     get current() { const p = this.players.find((x) => !x.fading && !x.theme.once); return p ? p.key : null; }
-    get title() { const p = this.players.find((x) => !x.fading); return p ? p.theme.title : ''; }
+    get title() { const p = this.players.find((x) => !x.fading); return p ? DZ.L(p.theme.title) : ''; }
     start() { this.on = true; if (!this.players.length) this.pauseUntil = 0; }
     setContext(cx) { Object.assign(this.context, cx); }
     alert() { this.context.alert = this.c.currentTime + 45; this.switchTo('alerte', 1.5); }
@@ -421,7 +421,7 @@ window.DZ = window.DZ || {};
       const p = { key, theme, gain, orch, sc, spb, start: c.currentTime + 0.2, idx: 0, loops: 0, maxLoops: theme.once ? 1 : 1 + Math.floor(R() * 2), fading: false };
       this.players.push(p);
       this.count[key] = (this.count[key] || 0) + 1;
-      if (this.onTheme && !theme.once) this.onTheme(theme.title);
+      if (this.onTheme && !theme.once) this.onTheme(DZ.L(theme.title));
       return p;
     }
     fade(p, sec) {

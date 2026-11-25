@@ -12,12 +12,14 @@ window.DZ = window.DZ || {};
   }
 
   function boot() {
+    DZ.applyLang();
+    DZ.translateDom(document.getElementById('app'));
     const st = DZ.Save.settings();
     let quality = st.quality || autoQuality();
     const game = new DZ.Game();
     const canvas = document.getElementById('view');
     // le jeu se joue en 3D (WebGL 2)
-    if (!DZ.G.webgl2Available()) throw new Error('ce navigateur ne gère pas WebGL 2, indispensable au rendu 3D du jeu. Essayez un navigateur récent (Chrome, Firefox, Safari, Edge) et vérifiez que l\'accélération matérielle est activée.');
+    if (!DZ.G.webgl2Available()) throw new Error(DZ.L('ce navigateur ne gère pas WebGL 2, indispensable au rendu 3D du jeu. Essayez un navigateur récent (Chrome, Firefox, Safari, Edge) et vérifiez que l\'accélération matérielle est activée.'));
     const renderer = new DZ.G.Renderer3D(canvas, game);
     renderer.setQuality(quality);
     const saved = DZ.Save.load();
@@ -52,7 +54,7 @@ window.DZ = window.DZ || {};
       game.setSpeed(0); ui.refreshSpeed();
       ui.openPlayerSetup(opts, (p) => { done(p); game.setSpeed(prev || 1); ui.refreshSpeed(); });
     };
-    ui.onReset = () => askPlayer({ title: 'Nouvelle partie', go: 'Commencer la partie', name: game.s.player.set ? game.s.player.name : '', gender: game.s.player.gender, avatar: game.s.player.avatar }, (p) => {
+    ui.onReset = () => askPlayer({ title: DZ.L('Nouvelle partie'), go: DZ.L('Commencer la partie'), name: game.s.player.set ? game.s.player.name : '', gender: game.s.player.gender, avatar: game.s.player.avatar }, (p) => {
       DZ.Save.clear();
       game.newGame(undefined, Object.assign(p, { set: true }));
       renderer.resetCamera();
@@ -107,8 +109,8 @@ window.DZ = window.DZ || {};
         renderer.fps = fps;
         fpsT = 0; fpsN = 0;
         if (!DZ.Save.settings().quality && !document.hidden && now - started > 6000) {
-          if (fps < 38 && quality === 'high') { ui.onQuality('medium'); ui.toast('⚙️', 'Qualité graphique réduite automatiquement pour garder un jeu fluide.', 'info'); }
-          else if (fps < 30 && quality === 'medium') { ui.onQuality('low'); ui.toast('⚙️', 'Qualité graphique réduite automatiquement pour garder un jeu fluide.', 'info'); }
+          if (fps < 38 && quality === 'high') { ui.onQuality('medium'); ui.toast('⚙️', DZ.L('Qualité graphique réduite automatiquement pour garder un jeu fluide.'), 'info'); }
+          else if (fps < 30 && quality === 'medium') { ui.onQuality('low'); ui.toast('⚙️', DZ.L('Qualité graphique réduite automatiquement pour garder un jeu fluide.'), 'info'); }
         }
       }
       requestAnimationFrame(loop);
@@ -120,16 +122,17 @@ window.DZ = window.DZ || {};
       document.getElementById('loading').classList.add('done');
       if (game.s.over) { ui.showGameOver(); return; } // partie perdue lors de la dernière session
       if (!game.s.player.set) {
-        askPlayer(resumed
-          ? { title: 'Qui dirige le parc ?', text: 'Nouveauté : votre parc a maintenant un directeur ou une directrice. Choisissez votre nom, votre genre et votre avatar : il se rendra sur place à chacune de vos actions.', go: 'Reprendre la partie' }
-          : { title: 'Bienvenue à DinoZoo !', go: 'Ouvrir le parc' }, (p) => {
+        askPlayer(resumed && game.s.day > 1
+          ? { title: DZ.L('Qui dirige le parc ?'), text: DZ.L('Nouveauté : votre parc a maintenant un directeur ou une directrice. Choisissez votre nom, votre genre et votre avatar : il se rendra sur place à chacune de vos actions.'), go: DZ.L('Reprendre la partie') }
+          : { title: DZ.L('Bienvenue à DinoZoo !'), go: DZ.L('Ouvrir le parc'), lang: true }, (p) => {
+          if (!DZ.langChosen) DZ.setLang(DZ.lang); // langue confirmée par la première partie
           game.setPlayer(p);
           DZ.Save.save(game);
           ui.greet();
           DZ.tutorial.start(false);
         });
       } else {
-        if (resumed) ui.toast('💾', `Bon retour au parc, ${game.s.player.name} ! Reprise au jour ${game.s.day}.`, 'good');
+        if (resumed) ui.toast('💾', DZ.L('Bon retour au parc, {0} ! Reprise au jour {1}.', game.s.player.name, game.s.day), 'good');
         DZ.tutorial.start(false);
       }
     }, 250);
@@ -144,7 +147,7 @@ window.DZ = window.DZ || {};
     try { boot(); } catch (err) {
       console.error(err);
       const l = document.getElementById('loading');
-      if (l) l.querySelector('.sub').textContent = 'Erreur au démarrage : ' + err.message;
+      if (l) l.querySelector('.sub').textContent = DZ.L('Erreur au démarrage : ') + err.message;
     }
   });
 })();

@@ -110,10 +110,12 @@ window.DZ = window.DZ || {};
   /* ---------- Formats ---------- */
   U.fmt = function (n) {
     const neg = n < 0;
-    const s = Math.round(Math.abs(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    const s = Math.round(Math.abs(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, DZ.lang === 'en' ? ',' : ' ');
     return (neg ? '−' : '') + s;
   };
-  U.money = (n) => U.fmt(n) + ' €';
+  U.money = (n) => (DZ.lang === 'en' ? (n < 0 ? '−€' + U.fmt(-n) : '€' + U.fmt(n)) : U.fmt(n) + ' €');
+  /* Nombre décimal : virgule en français, point en anglais. */
+  U.dec = (n, d) => { const s = typeof n === 'number' && d != null ? n.toFixed(d) : String(n); return DZ.lang === 'en' ? s : s.replace('.', ','); };
   U.hourStr = function (h) {
     const hh = Math.floor(h) % 24, mm = Math.floor((h - Math.floor(h)) * 60);
     return String(hh).padStart(2, '0') + ':' + String(Math.floor(mm / 10) * 10).padStart(2, '0');

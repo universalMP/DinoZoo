@@ -26,6 +26,8 @@ Construisez des chemins depuis l'entrée, des enclos reliés à ces chemins, pui
 - Événements aléatoires : affluence, orages, maladies, critiques, mécènes…
 - **Des clôtures qui s'usent** sous les charges des gros animaux : à réparer, ou en entretien automatique.
 - **Des évasions** si vos clôtures sont trop faibles ou abîmées : l'animal erre dans le parc, la foule panique. Rattrapez-le vite avec la vétérinaire et l'hélicoptère : si un carnivore attaque un visiteur, la partie est perdue.
+- **Un classement en ligne** : les meilleures parties de tous les joueurs, selon les gains totaux (menu ☰, 🏆). Votre nom de directeur et votre score y sont publics ; vous pouvez ne pas participer.
+- **En français ou en anglais** : la langue se choisit à la première partie, puis dans le menu ☰.
 - Cycle jour et nuit, météo.
 - **Son 3D haut de gamme**, entièrement synthétisé : voix propres à chaque espèce, pluie, vent et tonnerre d'orage, vagues, rivière, oiseaux, insectes, foule de visiteurs.
 - **Six thèmes musicaux orchestraux originaux** qui suivent le moment de la journée et les événements (🎵 pour couper la musique, volumes dans le menu ☰).
@@ -82,6 +84,10 @@ docs/references-dinos.md  références de chaque espèce et invites Meshy
 js/audio.js         environnement sonore 3D (Web Audio)
 js/music.js         orchestre de synthèse et thèmes musicaux
 js/save.js          sauvegarde locale
+js/scores.js        classement en ligne (envoi des scores, lecture du classement)
+js/i18n.js          langue du jeu (français ou anglais) et fonction de traduction DZ.L
+js/lang-en.js       traductions anglaises (textes, espèces, bâtiments, aide)
+api/scores.mjs      fonction Vercel du classement (base Upstash Redis)
 js/ui.js            interface
 js/tutorial.js      tutoriel
 js/main.js          démarrage et boucle

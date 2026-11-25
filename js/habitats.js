@@ -74,9 +74,9 @@ window.DZ = window.DZ || {};
   /* Tracé d'une passerelle entre deux enclos : le plus court, bien en face. */
   P.linkPlan = function (aId, bId) {
     const A = this.s.buildings[aId], B = this.s.buildings[bId], K = C.links;
-    if (!A || !B || A === B) return { ok: false, reason: 'Choisissez un autre enclos' };
-    if (!isLand(this, A) || !isLand(this, B)) return { ok: false, reason: 'Les passerelles relient deux enclos terrestres' };
-    if (this.linksOf(A).some((l) => l.a === B.id || l.b === B.id)) return { ok: false, reason: 'Ces enclos sont déjà reliés' };
+    if (!A || !B || A === B) return { ok: false, reason: DZ.L('Choisissez un autre enclos') };
+    if (!isLand(this, A) || !isLand(this, B)) return { ok: false, reason: DZ.L('Les passerelles relient deux enclos terrestres') };
+    if (this.linksOf(A).some((l) => l.a === B.id || l.b === B.id)) return { ok: false, reason: DZ.L('Ces enclos sont déjà reliés') };
     let best = null, why = 'Ces enclos ne sont pas face à face';
     const tryPair = (P0, Q, dir, first, second) => {
       // P0 à gauche (dir x) ou au-dessus (dir y) de Q
@@ -89,7 +89,7 @@ window.DZ = window.DZ || {};
       const wdt = K.width;
       const r0min = Math.ceil(lo - 0.3), r0max = Math.floor(hi + 0.3) - wdt;
       if (r0max < r0min) return;
-      if (gap > K.maxLen) { why = `Trop loin : ${K.maxLen} cases au maximum`; return; }
+      if (gap > K.maxLen) { why = 'Trop loin : {0} cases au maximum'; return; }
       const r0 = U.clamp(Math.round((lo + hi) / 2 - wdt / 2), r0min, r0max);
       const u0 = P0[ax] + P0[ax + 2];
       for (let u = u0; u < u0 + gap; u++) for (let v = r0; v < r0 + wdt; v++) {
@@ -108,10 +108,10 @@ window.DZ = window.DZ || {};
     for (const pa of DZ.encParts(A)) for (const pb of DZ.encParts(B)) {
       for (const dir of ['x', 'y']) { tryPair(pa, pb, dir, A, B); tryPair(pb, pa, dir, B, A); }
     }
-    if (!best) return { ok: false, reason: why };
+    if (!best) return { ok: false, reason: DZ.L(why, K.maxLen) };
     best.cost = best.len ? K.base + best.len * K.perTile : Math.round(K.base * K.gateFactor);
     best.hours = this.worksHours(best.cost);
-    if (this.s.money < best.cost) return Object.assign(best, { ok: false, reason: 'Fonds insuffisants', plan: true });
+    if (this.s.money < best.cost) return Object.assign(best, { ok: false, reason: DZ.L('Fonds insuffisants'), plan: true });
     return Object.assign(best, { ok: true });
   };
 
@@ -174,7 +174,7 @@ window.DZ = window.DZ || {};
       if (l.cons.t < l.cons.dur) continue;
       delete l.cons;
       this._updateHappiness();
-      this.notify('🌉', l.len ? 'Passerelle terminée : les dinosaures peuvent passer d\'un enclos à l\'autre.' : 'Porte terminée : les deux enclos communiquent.', 'good', { type: 'select', building: l.a });
+      this.notify('🌉', DZ.L(l.len ? 'Passerelle terminée : les dinosaures peuvent passer d\'un enclos à l\'autre.' : 'Porte terminée : les deux enclos communiquent.'), 'good', { type: 'select', building: l.a });
       this.emit('linkDone', l);
       this.emit('mapChanged', { x0: l.x - 3, y0: l.y - 3, x1: l.x + l.w + 3, y1: l.y + l.h + 3 });
     }
@@ -277,10 +277,10 @@ window.DZ = window.DZ || {};
 
   P.mergePlan = function (aId, bId) {
     const A = this.s.buildings[aId], B = this.s.buildings[bId], M = C.merge;
-    if (!A || !B || A === B) return { ok: false, reason: 'Choisissez un autre enclos' };
-    if (!isLand(this, A) || !isLand(this, B)) return { ok: false, reason: 'Seuls les enclos terrestres peuvent être réunis' };
+    if (!A || !B || A === B) return { ok: false, reason: DZ.L('Choisissez un autre enclos') };
+    if (!isLand(this, A) || !isLand(this, B)) return { ok: false, reason: DZ.L('Seuls les enclos terrestres peuvent être réunis') };
     const sh = this.sharedSide(A, B);
-    if (sh.len < M.minShared) return { ok: false, reason: 'Ces enclos ne se touchent pas assez' };
+    if (sh.len < M.minShared) return { ok: false, reason: DZ.L('Ces enclos ne se touchent pas assez') };
     const level = Math.max(A.level, B.level);
     // l'enclos le moins avancé est mis au niveau de l'autre
     const eq = (e) => { let c = 0; const def = C.buildings[e.type]; for (let L = e.level; L < level; L++) c += def.upgrade[L - 1] * this.sizeFactor(e); return c; };
@@ -292,9 +292,9 @@ window.DZ = window.DZ || {};
       parts: DZ.encParts(A).concat(DZ.encParts(B)).map((p) => p.slice()), shared: sh.len, seam: sh.seam,
       hours: this.worksHours(cost), cap: Math.floor(space * C.enclosureLevels.capacity[level - 1])
     };
-    if (this.busy(A) || this.busy(B)) return Object.assign(plan, { ok: false, reason: 'Attendez la fin des travaux en cours' });
-    if (this.transferBusy(A) || this.transferBusy(B)) return Object.assign(plan, { ok: false, reason: 'Un dinosaure est en cours de transfert' });
-    if (this.s.money < cost) return Object.assign(plan, { ok: false, reason: 'Fonds insuffisants' });
+    if (this.busy(A) || this.busy(B)) return Object.assign(plan, { ok: false, reason: DZ.L('Attendez la fin des travaux en cours') });
+    if (this.transferBusy(A) || this.transferBusy(B)) return Object.assign(plan, { ok: false, reason: DZ.L('Un dinosaure est en cours de transfert') });
+    if (this.s.money < cost) return Object.assign(plan, { ok: false, reason: DZ.L('Fonds insuffisants') });
     return plan;
   };
   P.mergeCandidates = function (b) {
@@ -535,12 +535,12 @@ window.DZ = window.DZ || {};
     for (const g of this.visitors) if (g.actBuilding === b.id && g.state === 'act') { g.sat = Math.min(100, g.sat + 6); g.mood = 'ravi'; g.bubbleT = 2.5; }
     this._updateHappiness();
     const fem = (d, m, w) => d.sex === 'F' ? w : m;
-    const title = f.mixed ? `Combat entre ${DZ.SPECIES[f.a.sp].name} et ${DZ.SPECIES[f.b.sp].name}` : `Combat de ${sp.name} mâles`;
+    const title = f.mixed ? DZ.L('Combat entre {0} et {1}', DZ.SPECIES[f.a.sp].name, DZ.SPECIES[f.b.sp].name) : DZ.L('Combat de {0} mâles', sp.name);
     if (hurt) {
-      this.notify('🩹', `${title} : ${this.who(hurt)} est ${fem(hurt, 'blessé', 'blessée')} ! Soignez-${fem(hurt, 'le', 'la')} (${U.money(this.treatCost(hurt))}) avant ${C.events.sickDaysToDeath} jours.`, 'bad', { type: 'treat', dino: hurt.id });
+      this.notify('🩹', title + ' : ' + DZ.L(fem(hurt, '{0} est blessé ! Soignez-le ({1}) avant {2} jours.', '{0} est blessée ! Soignez-la ({1}) avant {2} jours.'), this.who(hurt), U.money(this.treatCost(hurt)), C.events.sickDaysToDeath), 'bad', { type: 'treat', dino: hurt.id });
     } else if (!b.lastFightNote || absHour(s) - b.lastFightNote > F.noticeHours) {
       b.lastFightNote = absHour(s);
-      this.notify('⚔️', `${title} ! ${win.name} l'emporte, ${lose.name} ${fled ? 's\'enfuit par la passerelle' : 'bat en retraite'}.`, 'info', { type: 'select', building: b.id });
+      this.notify('⚔️', title + ' ! ' + DZ.L(fled ? '{0} l\'emporte, {1} s\'enfuit par la passerelle.' : '{0} l\'emporte, {1} bat en retraite.', win.name, lose.name), 'info', { type: 'select', building: b.id });
     }
     this.emit('fight', { b, win, lose, hurt, fled });
   };
@@ -654,7 +654,7 @@ window.DZ = window.DZ || {};
     }
     this._updateHappiness();
     const ps = DZ.SPECIES[pred.sp];
-    this.notify('🦴', `Drame dans l'enclos : ${pred.name}, ${ps.name === 'Tyrannosaurus rex' ? 'le T-Rex' : DZ.leSp(pred.sp)}, a attrapé ${this.who(prey)}. Séparez carnivores et herbivores !`, 'bad', { type: 'select', building: b.id });
+    this.notify('🦴', DZ.L('Drame dans l\'enclos : {0}, {1}, a attrapé {2}. Séparez carnivores et herbivores !', pred.name, ps.name === 'Tyrannosaurus rex' ? DZ.L('le T-Rex') : DZ.leSp(pred.sp), this.who(prey)), 'bad', { type: 'select', building: b.id });
     this.emit('kill', { b, pred, prey });
     this.emit('dinoRemoved', prey);
   };
@@ -743,15 +743,15 @@ window.DZ = window.DZ || {};
       prey.state = 'roar'; prey.anim = 0; prey.timer = 1.8; this.emit('roar', prey);
       pred.bruise = s.day;
       const p = this._fleePoint(b, pred, prey); pred.state = 'walk'; pred.gx = p.x; pred.gy = p.y; pred.timer = 0; pred.run = 1.6;
-      text = `${this.who(prey)} a repoussé l'attaque de ${pred.name} !`;
+      text = DZ.L('{0} a repoussé l\'attaque de {1} !', this.who(prey), pred.name);
     } else {
       if (why !== 'passerelle') { const p = this._fleePoint(b, prey, pred); prey.state = 'walk'; prey.gx = p.x; prey.gy = p.y; prey.timer = 0; prey.run = 1.8; }
       prey.bruise = s.day;
-      text = why === 'passerelle' ? `${this.who(prey)} a échappé à ${pred.name} en filant par la passerelle !` : `${this.who(prey)} a échappé de justesse à ${pred.name} !`;
+      text = DZ.L(why === 'passerelle' ? '{0} a échappé à {1} en filant par la passerelle !' : '{0} a échappé de justesse à {1} !', this.who(prey), pred.name);
     }
     this._updateHappiness();
-    if (hurt) this.notify('🩹', `${this.who(prey)} se défend : ${this.who(hurt)} est ${fem(hurt, 'blessé', 'blessée')} ! Soignez-${fem(hurt, 'le', 'la')} (${U.money(this.treatCost(hurt))}) avant ${C.events.sickDaysToDeath} jours.`, 'bad', { type: 'treat', dino: hurt.id });
-    else if (!b.lastHuntNote || now - b.lastHuntNote > K.noticeHours) { b.lastHuntNote = now; this.notify('⚠️', `${text} Séparez carnivores et herbivores.`, 'info', { type: 'select', building: b.id }); }
+    if (hurt) this.notify('🩹', DZ.L('{0} se défend :', this.who(prey)) + ' ' + DZ.L(fem(hurt, '{0} est blessé ! Soignez-le ({1}) avant {2} jours.', '{0} est blessée ! Soignez-la ({1}) avant {2} jours.'), this.who(hurt), U.money(this.treatCost(hurt)), C.events.sickDaysToDeath), 'bad', { type: 'treat', dino: hurt.id });
+    else if (!b.lastHuntNote || now - b.lastHuntNote > K.noticeHours) { b.lastHuntNote = now; this.notify('⚠️', text + ' ' + DZ.L('Séparez carnivores et herbivores.'), 'info', { type: 'select', building: b.id }); }
     this.emit('huntMiss', { b, pred, prey, why });
   };
 

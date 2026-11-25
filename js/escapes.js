@@ -102,8 +102,8 @@ window.DZ = window.DZ || {};
     this.dailyTarget = this.computeDailyTarget();
     this.emit('escape', { dino: d, building: b, x: out.x, y: out.y, danger });
     const closed = danger >= E.close;
-    const what = sp.predator ? (closed ? 'Les visiteurs fuient en hurlant, le parc ferme ses portes.' : 'Les visiteurs proches s\'enfuient.') : (danger >= 0.3 ? 'Les visiteurs proches s\'écartent, inquiets.' : 'Quelques visiteurs s\'inquiètent.');
-    this.notify('🚨', `Évasion ! ${this.who(d)} a enfoncé la clôture et se promène dans le parc. ${what}${sp.predator ? ' S\'il attaque un visiteur, la partie est perdue !' : ''} Sélectionnez-${d.sex === 'F' ? 'la' : 'le'} et envoyez la vétérinaire, puis réparez la clôture. Note −${stars.toFixed(2)} ★.`, 'bad', { type: 'dino', dino: d.id });
+    const what = DZ.L(sp.predator ? (closed ? 'Les visiteurs fuient en hurlant, le parc ferme ses portes.' : 'Les visiteurs proches s\'enfuient.') : (danger >= 0.3 ? 'Les visiteurs proches s\'écartent, inquiets.' : 'Quelques visiteurs s\'inquiètent.'));
+    this.notify('🚨', DZ.L('Évasion ! {0} a enfoncé la clôture et se promène dans le parc.', this.who(d)) + ' ' + what + (sp.predator ? ' ' + DZ.L('S\'il attaque un visiteur, la partie est perdue !') : '') + ' ' + DZ.L(d.sex === 'F' ? 'Sélectionnez-la et envoyez la vétérinaire, puis réparez la clôture.' : 'Sélectionnez-le et envoyez la vétérinaire, puis réparez la clôture.') + ' ' + DZ.L('Note −{0} ★.', stars.toFixed(2)), 'bad', { type: 'dino', dino: d.id });
   };
 
   /* Les visiteurs proches paniquent et fuient (les portes du parc ferment s'il est dangereux).
@@ -203,7 +203,7 @@ window.DZ = window.DZ || {};
     for (const o of this.visitors) { o.panic = true; o.frozen = false; o.fearT = 0; o.mood = 'peur'; o.bubbleT = 3; if (o.state !== 'exit') { o.hidden = false; this.goExit(o); } }
     s.over = {
       day: s.day, sp: d.sp, name: d.name, sex: d.sex, earned: Math.round(s.totalEarned),
-      text: `${this.who(d)}, ${d.sex === 'F' ? 'échappée' : 'échappé'} de son enclos, a attaqué un visiteur. Les autorités ferment DinoZoo : la partie est terminée.`
+      text: DZ.L(d.sex === 'F' ? '{0}, échappée de son enclos, a attaqué un visiteur. Les autorités ferment DinoZoo : la partie est terminée.' : '{0}, échappé de son enclos, a attaqué un visiteur. Les autorités ferment DinoZoo : la partie est terminée.', this.who(d))
     };
     this.emit('attack', { dino: d, x: g.x, y: g.y });
     this.emit('gameOver', s.over);

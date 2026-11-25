@@ -44,10 +44,10 @@ window.DZ = window.DZ || {};
   P.repairFence = function (id) {
     const b = this.s.buildings[id];
     if (!this.hasFence(b)) return { ok: false };
-    if (this.busy(b)) return { ok: false, reason: 'Des travaux sont déjà en cours' };
-    if (this.fenceOf(b) >= 99.5) return { ok: false, reason: 'La clôture est en parfait état' };
+    if (this.busy(b)) return { ok: false, reason: DZ.L('Des travaux sont déjà en cours') };
+    if (this.fenceOf(b) >= 99.5) return { ok: false, reason: DZ.L('La clôture est en parfait état') };
     const cost = this.repairCost(b);
-    if (this.s.money < cost) return { ok: false, reason: 'Fonds insuffisants' };
+    if (this.s.money < cost) return { ok: false, reason: DZ.L('Fonds insuffisants') };
     this._spend(cost, 'construction');
     b.upg = { t: 0, dur: Math.max(0.2, this.worksHours(cost) * 0.6), repair: true };
     this.emit('upgradeStarted', b);
@@ -57,7 +57,7 @@ window.DZ = window.DZ || {};
   P._finishRepair = function (b) {
     b.fence = 100; b.dmg = [];
     this.emit('fenceChanged', b);
-    this.notify('🔧', `Clôture réparée : ${DZ.bName(b)} est de nouveau sûr.`, 'good', { type: 'select', building: b.id });
+    this.notify('🔧', DZ.L('Clôture réparée : {0} est de nouveau sûr.', DZ.bName(b)), 'good', { type: 'select', building: b.id });
   };
   P.setAutoFence = function (id, on) { const b = this.s.buildings[id]; if (b) b.autoFix = on ? 1 : 0; };
 

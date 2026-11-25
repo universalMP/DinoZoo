@@ -71,8 +71,9 @@ window.DZ = window.DZ || {};
       this.clearHighlight();
       if (s.onShow) s.onShow(this.ui);
       if (s.highlight) { const h = document.querySelector(s.highlight); if (h) h.classList.add('pulse'); }
-      box.innerHTML = `<div class="step">Tutoriel · ${this.i + 1} / ${STEPS.length}</div><h3>${s.title}</h3><p>${s.text}</p>${s.todo ? `<div class="todo">➜ ${s.todo}</div>` : ''}
-        <div class="btns"><button class="btn small" data-skip>Passer le tutoriel</button>${s.next ? `<button class="btn primary" data-next>${s.last ? 'Commencer' : 'Suivant'}</button>` : ''}</div>`;
+      const L = DZ.L;
+      box.innerHTML = `<div class="step">${L('Tutoriel · {0} / {1}', this.i + 1, STEPS.length)}</div><h3>${L(s.title)}</h3><p>${L(s.text)}</p>${s.todo ? `<div class="todo">➜ ${L(s.todo)}</div>` : ''}
+        <div class="btns"><button class="btn small" data-skip>${L('Passer le tutoriel')}</button>${s.next ? `<button class="btn primary" data-next>${L(s.last ? 'Commencer' : 'Suivant')}</button>` : ''}</div>`;
       box.classList.remove('hidden');
       box.querySelector('[data-skip]').addEventListener('click', () => this.finish());
       const n = box.querySelector('[data-next]');

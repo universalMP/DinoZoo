@@ -69,7 +69,7 @@ window.DZ = window.DZ || {};
      sur l'enclos ou à côté ; le tracé s'arrête juste devant les clôtures. */
   P.skyPlan = function (x0, y0, x1, y1) {
     const K = C.skywalk;
-    const fail = (reason, extra) => Object.assign({ ok: false, reason }, extra || {});
+    const fail = (reason, extra) => Object.assign({ ok: false, reason: DZ.L(reason, K.maxLen) }, extra || {});
     if (!inMap(x0, y0) || !inMap(x1, y1)) return fail('Hors de la carte');
     const dir = Math.abs(x1 - x0) >= Math.abs(y1 - y0) ? 'x' : 'y';
     if (dir === 'x') y1 = y0; else x1 = x0;
@@ -98,7 +98,7 @@ window.DZ = window.DZ || {};
     }
     plan.encs = [...encs];
     if (plan.len < 2) return fail('Enclos trop étroit à cet endroit', plan);
-    if (plan.len > K.maxLen) return fail(`Trop longue : ${K.maxLen} cases au plus au-dessus des enclos`, plan);
+    if (plan.len > K.maxLen) return fail('Trop longue : {0} cases au plus au-dessus des enclos', plan);
     let extra = 0;
     for (const [x, y] of ends) {
       if (!inMap(x, y)) return fail('Hors de la carte', plan);
@@ -302,22 +302,22 @@ window.DZ = window.DZ || {};
   };
   P.transferBusy = function (b) { return (this.transfers || []).some((tr) => !tr.landed && (tr.from === b.id || tr.to === b.id)); };
   P.canTransfer = function (d, b) {
-    if (!d) return { ok: false, reason: 'Animal introuvable' };
-    if (d.tr) return { ok: false, reason: 'Transfert déjà en cours' };
-    if (!b || !this.isEnclosure(b)) return { ok: false, reason: 'Choisissez un enclos' };
-    if (b.id === d.enc && !d.loose) return { ok: false, reason: 'C\'est déjà son enclos' };
-    if (b.cons) return { ok: false, reason: 'Enclos encore en construction' };
+    if (!d) return { ok: false, reason: DZ.L('Animal introuvable') };
+    if (d.tr) return { ok: false, reason: DZ.L('Transfert déjà en cours') };
+    if (!b || !this.isEnclosure(b)) return { ok: false, reason: DZ.L('Choisissez un enclos') };
+    if (b.id === d.enc && !d.loose) return { ok: false, reason: DZ.L('C\'est déjà son enclos') };
+    if (b.cons) return { ok: false, reason: DZ.L('Enclos encore en construction') };
     const sp = DZ.SPECIES[d.sp], def = C.buildings[b.type];
     if (!this.habitatOk(d.sp, b)) {
-      if (sp.habitat === 'air') return { ok: false, reason: 'Il faut une volière' };
-      if (sp.habitat === 'water') return { ok: false, reason: 'Il faut un lagon marin' };
-      if (def.kind !== 'land') return { ok: false, reason: 'Il faut un enclos terrestre' };
-      return { ok: false, reason: 'Enclos trop petit (' + (sp.size === 'L' ? 'grand' : 'moyen') + ' enclos requis)' };
+      if (sp.habitat === 'air') return { ok: false, reason: DZ.L('Il faut une volière') };
+      if (sp.habitat === 'water') return { ok: false, reason: DZ.L('Il faut un lagon marin') };
+      if (def.kind !== 'land') return { ok: false, reason: DZ.L('Il faut un enclos terrestre') };
+      return { ok: false, reason: DZ.L('Enclos trop petit (') + (sp.size === 'L' ? 'grand' : 'moyen') + ' enclos requis)' };
     }
     // un évadé qui rentre chez lui y a gardé sa place
-    if (this.usedSpace(b) + (d.loose && b.id === d.enc ? 0 : this.dinoSpace(d)) > this.capacity(b)) return { ok: false, reason: 'Plus de place dans cet enclos' };
+    if (this.usedSpace(b) + (d.loose && b.id === d.enc ? 0 : this.dinoSpace(d)) > this.capacity(b)) return { ok: false, reason: DZ.L('Plus de place dans cet enclos') };
     const cost = this.transferCost(d);
-    if (this.s.money < cost) return { ok: false, reason: 'Fonds insuffisants', cost };
+    if (this.s.money < cost) return { ok: false, reason: DZ.L('Fonds insuffisants'), cost };
     let rivals = 0;
     if (d.sex === 'M' && !d.young && sp.terr) rivals = this.dinosIn(b).filter((o) => o !== d && o.sp === d.sp && o.sex === 'M' && !o.young).length;
     return { ok: true, cost, warning: this.wouldConflict(d.sp, b), rivals };
@@ -404,8 +404,8 @@ window.DZ = window.DZ || {};
   }
 
   P.transferPhaseText = function (tr) {
-    if (tr.d.loose && tr.phase === 'vet') return '🩺 La vétérinaire le poursuit';
-    return { vet: '🩺 La vétérinaire arrive', enter: '🩺 La vétérinaire s\'approche', aim: '💉 Fléchette anesthésiante', drowsy: '😴 Il s\'endort', heliIn: '🚁 L\'hélicoptère arrive', lift: '🚁 Levage dans le filet', carry: '🚁 En vol vers son nouvel enclos', drop: '🚁 Dépose en douceur', leave: '😴 Réveil dans son nouvel enclos', done: '' }[tr.phase] || '';
+    if (tr.d.loose && tr.phase === 'vet') return DZ.L('🩺 La vétérinaire le poursuit');
+    return DZ.L({ vet: '🩺 La vétérinaire arrive', enter: '🩺 La vétérinaire s\'approche', aim: '💉 Fléchette anesthésiante', drowsy: '😴 Il s\'endort', heliIn: '🚁 L\'hélicoptère arrive', lift: '🚁 Levage dans le filet', carry: '🚁 En vol vers son nouvel enclos', drop: '🚁 Dépose en douceur', leave: '😴 Réveil dans son nouvel enclos', done: '' }[tr.phase] || '');
   };
 
   P._updateTransfers = function (dt) {
@@ -542,10 +542,10 @@ window.DZ = window.DZ || {};
     if (wasLoose) {
       const left = this.looseDinos().length;
       this.emit('recaptured', tr);
-      this.notify('✅', `${this.who(d)} est de retour dans un enclos.${left ? '' : ' Le parc est de nouveau sûr : les visiteurs reviennent.'}`, 'good', { type: 'select', building: b.id });
+      this.notify('✅', DZ.L('{0} est de retour dans un enclos.', this.who(d)) + (left ? '' : ' ' + DZ.L('Le parc est de nouveau sûr : les visiteurs reviennent.')), 'good', { type: 'select', building: b.id });
       return;
     }
-    this.notify('🚁', `${this.who(d)} a ${d.sex === 'F' ? 'été déposée' : 'été déposé'} dans son nouvel enclos. ${d.sex === 'F' ? 'Elle' : 'Il'} se réveille doucement.`, 'good', { type: 'select', building: b.id });
+    this.notify('🚁', DZ.L(d.sex === 'F' ? '{0} a été déposée dans son nouvel enclos. Elle se réveille doucement.' : '{0} a été déposé dans son nouvel enclos. Il se réveille doucement.', this.who(d)), 'good', { type: 'select', building: b.id });
   };
 
   /* Hélicoptère d'un transfert (même forme que deliveryPose ; null s'il n'est pas là). */

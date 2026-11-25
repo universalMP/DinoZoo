@@ -197,6 +197,28 @@ La grille des cases reste la règle du jeu (placement, chemins, collisions), mai
 - **Vignettes du catalogue** rendues en 3D hors écran (cadrage automatique sur la boîte englobante).
 - **Qualité** : élevée (ombres 2048, densité d'herbe et de jungle maximale), moyenne (ombres 1024, résolution 85 %), basse (sans ombres, résolution 70 %, moins de détails). Mesuré à 120 images/s (plafond de l'écran) sur un parc complet de 18 dinosaures et des centaines de visiteurs.
 
+## Classement en ligne
+
+- `api/scores.mjs` : fonction Vercel sans dépendance, qui parle à Upstash Redis par son API REST (`KV_REST_API_URL`, `KV_REST_API_TOKEN`). Un ensemble trié `dz:scores` (identifiant de partie → gains totaux) et un hachage `dz:run:<id>` par partie (nom, avatar, jour, gains, note, partie perdue). On garde les 1 000 meilleures parties ; la fonction renvoie les 50 premières et le rang de la partie du joueur.
+- Chaque partie a un identifiant aléatoire (`s.runId`). Le score part à la fin de chaque journée et à la fin de la partie, en texte brut (pas de requête préalable CORS) : ça marche aussi depuis itch.io et depuis un fichier local. Hors ligne, le jeu continue sans classement.
+- Le dépôt est public : n'importe qui peut écrire à l'API. Garde-fous : nom nettoyé (20 caractères), gains au plus 2,5 M€ par jour de jeu, une partie ne recule jamais et ne gagne pas plus que vraisemblable entre deux envois, 40 envois par adresse et par 10 minutes. Ce n'est pas un anti-triche complet.
+- Les serveurs locaux (localhost, 127.0.0.1) n'envoient jamais de score : les parties de test ne polluent pas le classement.
+- Le joueur peut ne pas participer (case dans la fenêtre du classement, réglage `leaderboard`).
+
+## Langues
+
+- Le texte source est le français. `DZ.L('Texte {0}', x)` renvoie la traduction de `js/lang-en.js` quand le jeu est en anglais. Les phrases accordées (genre, pluriel) ont une clé par variante.
+- Les données (espèces, familles, bâtiments, avatars, niveaux d'enclos, noms des nouveaux dinosaures) sont remplacées au démarrage par `DZ.applyLang()`. La page (`index.html`) est traduite par `DZ.translateDom`.
+- Nombres : espace et virgule en français, virgule des milliers et point en anglais (`U.fmt`, `U.dec`, `U.money` : « 12 000 € » / « €12,000 »).
+- La langue se choisit dans la fenêtre de la première partie (proposée selon la langue du navigateur), puis dans le menu ; en changer sauvegarde et recharge la page.
+- Contrôle : en anglais, `DZ.missing` liste les textes passés à `DZ.L` sans traduction.
+
+## Avatars du directeur
+
+- Toujours dessinés en code (`G.avatarMeshes`), mais plus détaillés : torse modelé (taille, poitrine, épaules arrondies), bras en deux segments avec mains (paume, doigts, pouce), jambes avec genoux, chaussures à semelle (bottes ou baskets), visage (yeux avec iris et pupille, paupières, sourcils, cils, nez, bouche, oreilles, menton).
+- Tenues : poches à rabat, pattes d'épaule et insigne (garde), gilet et sacoche (paléontologue), blouse longue ouverte à revers et stéthoscope (vétérinaire), bretelles de sac à dos et bandana (aventurier·ère), lunettes (scientifique), combinaison à fermeture éclair, écussons, gants, col fourré et lunettes d'aviateur (pilote). Coiffures : queue-de-cheval, chignon, cheveux longs.
+- Mêmes points d'attache qu'avant (hanches, épaule droite, main) : les animations et les outils tenus n'ont pas changé.
+
 ## Technique
 
 - **Aucun module ES** : `type="module"` est bloqué en `file://` par la plupart des navigateurs. Les scripts sont donc chargés dans l'ordre et partagent un espace de noms global `DZ`. Le jeu s'ouvre en double-cliquant sur `index.html`.

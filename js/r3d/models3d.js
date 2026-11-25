@@ -28,7 +28,8 @@
       g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 6; g.strokeRect(x + 3, y + 3, 250, 58);
       g.fillStyle = s[2]; g.font = `700 ${s[0].length > 10 ? 30 : 38}px Georgia, serif`;
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(s[0].trim(), x + 128, y + 34);
+      const txt = s[0].trim();
+      g.fillText(DZ.lang === 'en' ? ({ BILLETS: 'TICKETS' }[txt] || txt) : txt, x + 128, y + 34);
     });
     return c;
   };
@@ -822,69 +823,217 @@
   G.avatarMeshes = function (i, gender) {
     const A = DZ.AVATARS[i] || DZ.AVATARS[0];
     const f = gender === 'f', a = gender === 'a';
-    const sh = f ? 0.046 : 0.054;
+    const sh = f ? 0.047 : 0.054;          // demi-largeur des épaules (attache du bras droit)
+    const shade = (c, k) => { const v = U.rgb(c); return '#' + v.map((x) => Math.max(0, Math.min(255, Math.round(x * k))).toString(16).padStart(2, '0')).join(''); };
+    const top = A.top, topD = shade(A.top, 0.82), bot = A.bottom, skin = A.skin, skinD = shade(A.skin, 0.86);
+    const shoe = A.shoe || '#3a2a1e', rolled = A.sleeves === 'rolled', gloves = A.gloves;
     const body = new MB();
-    // torse et blouse
-    body.material('cloth').col(A.top);
-    body.push().t(0, 0.15, 0).loft([{ p: [0, 0, 0], ry: f ? 0.047 : 0.044, rz: 0.031 }, { p: [0, 0.07, 0], ry: f ? 0.043 : 0.05, rz: 0.034 }, { p: [0, 0.13, 0], ry: sh, rz: 0.033 }, { p: [0, 0.148, 0], ry: 0.02, rz: 0.02 }], 10).pop();
-    if (A.coat) body.push().t(0, 0.07, 0).loft([{ p: [0, 0, 0], ry: 0.058, rz: 0.042 }, { p: [0, 0.085, 0], ry: 0.049, rz: 0.035 }], 10).pop();
-    if (f && !A.coat) { body.col(A.bottom).push().t(0, 0.105, 0).loft([{ p: [0, 0, 0], ry: 0.05, rz: 0.038 }, { p: [0, 0.05, 0], ry: 0.046, rz: 0.032 }], 10).pop(); }
-    body.material('cloth').col('#2a2018').push().t(0, 0.148, 0).cyl(0.046, 0.046, 0.012, 10).pop();
-    // bras gauche (le droit est animé séparément)
-    body.col(A.top).push().t(-(sh + 0.006), 0.272, 0).rz(-0.14).t(0, -0.115, 0).cyl(0.014, 0.017, 0.115, 6).pop();
-    body.material('plain').col(A.skin);
-    body.push().t(-(sh + 0.022), 0.152, 0).sphere(0.016, 0.016, 0.016, 6, 4).pop();
-    // cou, tête
-    body.push().t(0, 0.288, 0).cyl(0.016, 0.016, 0.03, 6).pop();
-    body.push().t(0, 0.338, 0).sphere(0.043, 0.048, 0.043, 10, 7).pop();
-    body.push().t(0, 0.332, 0.041).sphere(0.008, 0.009, 0.008, 5, 3).pop();
-    body.col('#1a120c');
-    for (const sx of [-1, 1]) body.push().t(sx * 0.016, 0.344, 0.039).sphere(0.006, 0.006, 0.004, 4, 3).pop();
-    // cheveux
-    body.col(A.hair);
-    body.push().t(0, 0.353, -0.006).sphere(0.046, 0.037, 0.046, 10, 6).pop();
-    if (f) { body.push().t(0, 0.322, -0.03).sphere(0.045, 0.052, 0.03, 8, 5).pop(); body.push().t(0, 0.31, -0.055).rx(0.35).sphere(0.02, 0.045, 0.019, 7, 5).pop(); }
-    else if (a) body.push().t(0, 0.33, -0.012).sphere(0.05, 0.036, 0.047, 9, 5).pop();
-    // chapeau
+
+    /* ---- bassin et pantalon (haut des jambes, fixe) ---- */
+    body.material('cloth').col(bot);
+    body.loft([{ p: [0, 0.128, 0], ry: f ? 0.047 : 0.043, rz: 0.03 }, { p: [0, 0.15, 0], ry: f ? 0.05 : 0.046, rz: 0.032 }, { p: [0, 0.178, 0.001], ry: f ? 0.044 : 0.044, rz: 0.03 }], 14);
+    // ceinture et boucle
+    body.material('plain').col(A.belt || '#3b2a1c').push().t(0, 0.172, 0.001).cyl(f ? 0.0455 : 0.0455, f ? 0.0445 : 0.0455, 0.011, 16).pop();
+    body.material('metal').col('#c9a65a').push().t(0, 0.1715, 0.031).box(0.014, 0.012, 0.004).pop();
+
+    /* ---- torse ---- */
+    body.material('cloth').col(top);
+    const torso = f
+      ? [{ p: [0, 0.176, 0.001], ry: 0.041, rz: 0.029 }, { p: [0, 0.2, 0.001], ry: 0.037, rz: 0.028 }, { p: [0, 0.228, 0.003], ry: 0.042, rz: 0.035 }, { p: [0, 0.25, 0.002], ry: 0.045, rz: 0.035 }, { p: [0, 0.268, 0], ry: 0.046, rz: 0.03 }, { p: [0, 0.282, -0.002], ry: 0.034, rz: 0.024 }, { p: [0, 0.291, -0.002], ry: 0.016, rz: 0.015 }]
+      : [{ p: [0, 0.176, 0.001], ry: 0.043, rz: 0.03 }, { p: [0, 0.205, 0.002], ry: 0.045, rz: 0.031 }, { p: [0, 0.235, 0.003], ry: 0.05, rz: 0.034 }, { p: [0, 0.258, 0.002], ry: 0.053, rz: 0.034 }, { p: [0, 0.273, 0], ry: 0.052, rz: 0.03 }, { p: [0, 0.285, -0.002], ry: 0.036, rz: 0.024 }, { p: [0, 0.293, -0.002], ry: 0.017, rz: 0.016 }];
+    body.loft(torso, 16);
+    // épaules arrondies
+    for (const sx of [-1, 1]) body.push().t(sx * (sh - 0.006), 0.268, -0.001).sphere(0.019, 0.017, 0.019, 10, 6).pop();
+    // col de chemise
+    if (!A.coat && A.hat !== 'aviator') { body.col(topD); for (const sx of [-1, 1]) body.push().t(sx * 0.011, 0.287, 0.012).rz(sx * 0.9).rx(-0.5).box(0.016, 0.004, 0.018).pop(); }
+    // boutons
+    body.material('plain').col(shade(top, 0.6));
+    if (!A.coat && !A.zip) for (let k = 0; k < 4; k++) body.push().t(0, 0.188 + k * 0.024, 0.031 + (k > 0 && k < 3 ? (f ? 0.005 : 0.003) : 0)).sphere(0.0022, 0.0022, 0.0015, 5, 3).pop();
+    // poches de poitrine avec rabat
+    if (A.pockets) {
+      for (const sx of [-1, 1]) {
+        body.material('cloth').col(topD).push().t(sx * 0.022, 0.236, f ? 0.036 : 0.035).box(0.018, 0.02, 0.003).pop();
+        body.col(shade(top, 0.72)).push().t(sx * 0.022, 0.252, f ? 0.0375 : 0.0365).box(0.02, 0.006, 0.004).pop();
+      }
+    }
+    // pattes d'épaule
+    if (A.epaulettes) { body.material('cloth').col(topD); for (const sx of [-1, 1]) body.push().t(sx * 0.034, 0.282, -0.001).rz(sx * 0.35).box(0.026, 0.004, 0.012).pop(); }
+    // insigne
+    if (A.badge) body.material('metal').col('#d7b24e').push().t(-0.022, 0.236, f ? 0.0395 : 0.0385).sphere(0.006, 0.007, 0.002, 6, 4).pop();
+    // gilet sans manches
+    if (A.vest) {
+      body.material('cloth').col(A.vest);
+      for (const sx of [-1, 1]) body.push().t(sx * 0.024, 0, 0).loft([{ p: [0, 0.17, 0.002], ry: 0.022, rz: 0.032 }, { p: [0, 0.22, 0.004], ry: 0.025, rz: f ? 0.037 : 0.036 }, { p: [0, 0.262, 0.001], ry: 0.025, rz: 0.034 }, { p: [0, 0.283, -0.003], ry: 0.014, rz: 0.025 }], 12).pop();
+      body.col(shade(A.vest, 0.8)); for (const sx of [-1, 1]) for (const y of [0.188, 0.214]) body.push().t(sx * 0.026, y, f ? 0.04 : 0.039).box(0.016, 0.015, 0.003).pop();
+    }
+    // fermeture éclair de combinaison et écussons
+    if (A.zip) {
+      body.material('metal').col('#9b9a92').push().t(0, 0.176, f ? 0.032 : 0.032).box(0.003, 0.11, 0.002).pop();
+      body.material('plain').col('#b8432d').push().t(-0.03, 0.245, 0.034).sphere(0.008, 0.008, 0.002, 8, 4).pop();
+      body.col('#e8d9a0').push().t(0.028, 0.243, 0.034).box(0.016, 0.01, 0.002).pop();
+    }
+    // blouse : longue, ouverte, avec revers et poches
+    if (A.coat) {
+      body.material('cloth').col(A.coatCol || '#eef0ec');
+      const cr = (k) => k * (f ? 1 : 1.04);
+      for (const sx of [-1, 1]) {
+        body.push().t(sx * 0.023, 0, 0).loft([
+          { p: [0, 0.075, -0.002], ry: cr(0.03), rz: 0.04 }, { p: [0, 0.13, 0], ry: cr(0.028), rz: 0.036 }, { p: [0, 0.18, 0.001], ry: cr(0.025), rz: 0.033 },
+          { p: [0, 0.23, 0.003], ry: cr(0.027), rz: f ? 0.038 : 0.037 }, { p: [0, 0.262, 0.001], ry: cr(0.03), rz: 0.034 }, { p: [0, 0.284, -0.003], ry: 0.016, rz: 0.026 }], 12).pop();
+        body.col(shade(A.coatCol || '#eef0ec', 0.86)).push().t(sx * 0.016, 0.265, 0.033).rz(sx * 0.5).rx(-0.15).box(0.012, 0.03, 0.003).pop();
+        body.col(shade(A.coatCol || '#eef0ec', 0.92)).push().t(sx * 0.03, 0.12, 0.037).box(0.022, 0.024, 0.003).pop();
+        body.col(A.coatCol || '#eef0ec');
+      }
+      body.material('plain').col('#2f5d8a').push().t(-0.028, 0.243, 0.04).box(0.003, 0.016, 0.003).pop();
+      body.col('#f4f4ef').push().t(0.026, 0.236, 0.039).box(0.016, 0.008, 0.002).pop();
+    }
+
+    /* ---- bras gauche (le droit est animé à part) ---- */
+    const armInto = (mb) => {
+      if (rolled) {
+        mb.material('cloth').col(A.coat ? (A.coatCol || '#eef0ec') : top).tube([[0, 0.004, 0], [0, -0.03, 0.001], [0, -0.056, 0.002]], 0.0175, 0.0145, 9);
+        mb.col(A.coat ? '#dedfd9' : topD).push().t(0, -0.06, 0.002).cyl(0.0158, 0.0158, 0.008, 10, 'both').pop();
+        mb.material('plain').col(skin).tube([[0, -0.056, 0.002], [0, -0.085, 0.006], [0, -0.112, 0.012]], 0.0122, 0.0102, 8);
+      } else {
+        mb.material('cloth').col(A.coat ? (A.coatCol || '#eef0ec') : top).tube([[0, 0.004, 0], [0, -0.04, 0.001], [0, -0.07, 0.004], [0, -0.108, 0.011]], 0.0175, 0.013, 9);
+        mb.col(A.coat ? shade(A.coatCol || '#eef0ec', 0.9) : topD).push().t(0, -0.112, 0.012).rx(0.2).cyl(0.0135, 0.0135, 0.008, 10, 'both').pop();
+      }
+      // main : paume, doigts serrés, pouce
+      mb.material('plain').col(gloves || skin);
+      mb.push().t(0, -0.124, 0.014).rx(0.2).sphere(0.0105, 0.0145, 0.0078, 8, 6).pop();
+      mb.push().t(0, -0.1365, 0.017).rx(0.25).sphere(0.009, 0.008, 0.0068, 7, 4).pop();
+      mb.col(gloves ? shade(gloves, 0.9) : skinD).push().t(0.006, -0.12, 0.021).rx(0.5).sphere(0.0045, 0.009, 0.0045, 6, 4).pop();
+    };
+    body.push().t(-(sh + 0.006), 0.272, 0).rz(-0.14);
+    armInto(body);
+    body.pop();
+
+    /* ---- cou et tête ---- */
+    body.material('plain').col(skin);
+    body.push().t(0, 0.283, 0).cyl(0.0145, 0.0135, 0.034, 10).pop();
+    body.push().t(0, 0.342, 0).sphere(0.0405, 0.044, 0.0425, 16, 10).pop();                 // crâne
+    body.push().t(0, 0.322, 0.008).sphere(f ? 0.029 : 0.032, 0.024, 0.03, 12, 7).pop();      // mâchoire
+    body.push().t(0, 0.305, 0.022).sphere(0.012, 0.009, 0.01, 8, 5).pop();                   // menton
+    for (const sx of [-1, 1]) {
+      body.push().t(sx * 0.041, 0.337, -0.002).sphere(0.006, 0.011, 0.007, 7, 5).pop();      // oreilles
+    }
+    body.push().t(0, 0.334, 0.0405).rx(-0.3).sphere(0.0046, 0.0085, 0.0058, 7, 5).pop();   // nez
+    body.col(skinD).push().t(0, 0.3275, 0.0438).sphere(0.0048, 0.0028, 0.003, 6, 3).pop();
+    // yeux : blanc, iris, pupille ; paupières et sourcils
+    for (const sx of [-1, 1]) {
+      body.material('plain').col('#f3efe6').push().t(sx * 0.0145, 0.3435, 0.0378).sphere(0.006, 0.0046, 0.0035, 8, 5).pop();
+      body.col(A.eyes || '#5b3b22').push().t(sx * 0.0145, 0.3433, 0.0407).sphere(0.0034, 0.0034, 0.0012, 8, 4).pop();
+      body.col('#0e0a08').push().t(sx * 0.0145, 0.3433, 0.0417).sphere(0.0015, 0.0015, 0.0006, 6, 3).pop();
+      body.col(skinD).push().t(sx * 0.0145, 0.3478, 0.0384).rz(sx * -0.08).box(0.012, 0.0014, 0.004).pop();
+      body.col(shade(A.hair, 0.9)).push().t(sx * 0.0155, 0.3535, 0.0398).rz(sx * -0.12).box(0.014, 0.0024, 0.003).pop();
+      if (f) body.col('#1a120c').push().t(sx * 0.0198, 0.3452, 0.0388).rz(sx * 0.5).box(0.0035, 0.001, 0.0015).pop(); // cils
+    }
+    // bouche
+    body.col(f ? '#a9504a' : '#86483d').push().t(0, 0.3155, 0.0362).box(0.013, 0.0022, 0.003).pop();
+    body.col(shade(skin, 0.8)).push().t(0, 0.3132, 0.0354).box(0.009, 0.0012, 0.0025).pop();
+    // barbe de quelques jours (homme, sans lunettes d'aviateur)
+    if (!f && !a && A.beard) { body.col(shade(A.hair, 1.0)); body.push().t(0, 0.316, 0.012).sphere(0.033, 0.022, 0.031, 12, 6).pop(); body.col(f ? '#b4524a' : '#8e4a3e').push().t(0, 0.315, 0.04).box(0.013, 0.0028, 0.004).pop(); }
+
+    /* ---- cheveux ---- */
+    body.material('cloth').col(A.hair);
+    const hatted = !!A.hat;
+    body.push().t(0, 0.353, -0.005).sphere(0.0445, 0.039, 0.0465, 14, 8).pop();             // calotte
+    body.push().t(0, 0.335, -0.02).sphere(0.043, 0.04, 0.032, 12, 7).pop();                  // arrière du crâne
+    for (const sx of [-1, 1]) body.push().t(sx * 0.039, 0.35, -0.002).sphere(0.007, 0.011, 0.013, 6, 5).pop(); // tempes
+    if (!hatted) body.push().t(0, 0.371, 0.022).rx(0.5).sphere(0.03, 0.012, 0.022, 10, 5).pop(); // frange, mèche
+    if (f) {
+      if (A.hairStyle === 'bun') body.push().t(0, 0.37, -0.04).sphere(0.019, 0.017, 0.018, 10, 6).pop();
+      else if (A.hairStyle === 'pony') { body.push().t(0, 0.345, -0.045).sphere(0.012, 0.012, 0.012, 7, 5).pop(); body.tube([[0, 0.345, -0.05], [0, 0.32, -0.062], [0, 0.29, -0.058], [0, 0.27, -0.05]], 0.012, 0.004, 8); }
+      else { body.loft([{ p: [0, 0.345, -0.026], ry: 0.044, rz: 0.03 }, { p: [0, 0.31, -0.03], ry: 0.046, rz: 0.028 }, { p: [0, 0.285, -0.028], ry: 0.04, rz: 0.022 }, { p: [0, 0.272, -0.026], ry: 0.03, rz: 0.012 }], 12, { caps: false }); }
+    } else if (a) body.push().t(0, 0.325, -0.016).sphere(0.047, 0.03, 0.04, 12, 6).pop();
+
+    /* ---- couvre-chefs ---- */
     if (A.hat === 'ranger' || A.hat === 'fedora') {
+      const ranger = A.hat === 'ranger', br = ranger ? 0.086 : 0.068;
       body.material('cloth').col(A.hatCol);
-      body.push().t(0, 0.37, -0.004).cyl(A.hat === 'ranger' ? 0.088 : 0.072, A.hat === 'ranger' ? 0.086 : 0.07, 0.006, 16, 'both').pop();
-      body.push().t(0, 0.374, -0.004).cyl(0.046, 0.04, A.hat === 'ranger' ? 0.042 : 0.036, 12).pop();
-      body.col('#2a1c12').push().t(0, 0.376, -0.004).cyl(0.047, 0.046, 0.01, 12, false).pop();
+      // bord légèrement relevé sur les côtés
+      body.push().t(0, 0.366, -0.004).loft([{ p: [0, 0, 0], ry: br, rz: br * 0.96 }, { p: [0, 0.004, 0], ry: br * 0.985, rz: br * 0.945 }, { p: [0, 0.0045, 0], ry: 0.001, rz: 0.001 }], 22).pop();
+      body.push().t(0, 0.369, -0.004).loft([{ p: [0, 0, 0], ry: 0.046, rz: 0.048 }, { p: [0, 0.03, 0], ry: 0.042, rz: 0.044 }, { p: [0, ranger ? 0.043 : 0.038, 0], ry: ranger ? 0.03 : 0.025, rz: ranger ? 0.032 : 0.04 }, { p: [0, ranger ? 0.045 : 0.036, 0], ry: 0.001, rz: 0.001 }], 16).pop();
+      if (!ranger) body.col(shade(A.hatCol, 0.8)).push().t(0, 0.405, 0.012).rx(-0.4).sphere(0.012, 0.004, 0.016, 8, 4).pop();
+      body.col(ranger ? '#3a2a18' : '#24170e').push().t(0, 0.371, -0.004).cyl(0.0475, 0.0465, 0.009, 16, false).pop();
+      if (ranger) body.material('metal').col('#d7b24e').push().t(0, 0.376, 0.044).sphere(0.005, 0.005, 0.002, 6, 4).pop();
     } else if (A.hat === 'cap') {
       body.material('cloth').col(A.hatCol);
-      body.push().t(0, 0.362, -0.004).sphere(0.048, 0.03, 0.048, 10, 5).pop();
-      body.push().t(0, 0.364, 0.05).box(0.06, 0.005, 0.05).pop();
+      body.push().t(0, 0.358, -0.004).sphere(0.0475, 0.034, 0.049, 14, 6).pop();
+      body.push().t(0, 0.364, 0.034).loft([{ p: [0, 0, 0], ry: 0.003, rz: 0.034 }, { p: [0, -0.004, 0.022], ry: 0.003, rz: 0.03 }, { p: [0, -0.008, 0.036], ry: 0.003, rz: 0.022 }], 12).pop();
+      body.col(shade(A.hatCol, 0.75)).push().t(0, 0.391, -0.004).sphere(0.005, 0.003, 0.005, 6, 3).pop();
+      body.material('plain').col('#f2ede0').push().t(0, 0.376, 0.044).rx(-0.5).box(0.018, 0.009, 0.002).pop();
     } else if (A.hat === 'aviator') {
       body.material('cloth').col(A.hatCol);
-      body.push().t(0, 0.35, -0.004).sphere(0.05, 0.045, 0.05, 10, 6).pop();
-      for (const sx of [-1, 1]) body.push().t(sx * 0.045, 0.318, 0).box(0.01, 0.04, 0.03).pop();
-      body.material('glass').col('#9fc1cf');
-      for (const sx of [-1, 1]) body.push().t(sx * 0.017, 0.366, 0.038).rx(1.2).cyl(0.012, 0.012, 0.01, 8, 'both').pop();
+      body.push().t(0, 0.35, -0.004).sphere(0.0485, 0.047, 0.05, 14, 8).pop();
+      for (const sx of [-1, 1]) body.push().t(sx * 0.043, 0.322, 0.002).sphere(0.01, 0.024, 0.02, 7, 5).pop();
+      body.col('#e9dcc0'); for (const sx of [-1, 1]) body.push().t(sx * 0.04, 0.307, 0.004).sphere(0.009, 0.006, 0.016, 6, 4).pop();
+      // lunettes relevées sur le front
+      body.material('plain').col('#3a2a1c').push().t(0, 0.37, 0).cyl(0.0495, 0.0495, 0.006, 16, false).pop();
+      body.material('metal').col('#8b8f93'); for (const sx of [-1, 1]) body.push().t(sx * 0.017, 0.372, 0.046).rx(1.25).cyl(0.0125, 0.0125, 0.009, 12, 'both').pop();
+      body.material('glass').col('#a7cfdc'); for (const sx of [-1, 1]) body.push().t(sx * 0.017, 0.374, 0.0505).rx(1.25).cyl(0.0095, 0.0095, 0.002, 12, 'both').pop();
+      // col en fourrure
+      body.material('cloth').col('#e3d3b4').push().t(0, 0.282, -0.003).loft([{ p: [0, 0, 0], ry: 0.038, rz: 0.03 }, { p: [0, 0.012, 0], ry: 0.03, rz: 0.026 }], 14, { caps: false }).pop();
     }
-    // accessoires
-    body.material('plain');
-    if (A.acc === 'radio') body.col('#2b2b2b').push().t(0.028, 0.23, 0.033).box(0.016, 0.03, 0.01).pop();
-    if (A.acc === 'bag') { body.col('#6b4a2c').push().t(-0.05, 0.15, 0.01).box(0.03, 0.04, 0.05).pop(); body.push().t(0, 0.215, 0).rz(0.75).box(0.012, 0.15, 0.072).pop(); }
-    if (A.acc === 'stetho') { body.col('#30353a'); body.tube([[-0.022, 0.29, 0.02], [-0.03, 0.255, 0.033], [0, 0.235, 0.036], [0.03, 0.255, 0.033], [0.022, 0.29, 0.02]], 0.004, 0.004, 5); }
-    if (A.acc === 'bandana') body.col('#c8a14a').push().t(0, 0.287, 0.012).rx(-0.3).cone(0.026, 0.035, 6).pop();
-    if (A.acc === 'glasses') { body.col('#1f1f1f'); for (const sx of [-1, 1]) body.push().t(sx * 0.016, 0.344, 0.042).rx(Math.PI / 2).cyl(0.011, 0.011, 0.003, 10, false).pop(); }
+
+    /* ---- accessoires ---- */
+    if (A.acc === 'radio') { body.material('plain').col('#2b2b2b').push().t(0.04, 0.155, 0.02).box(0.014, 0.03, 0.01).pop(); body.col('#111').push().t(0.044, 0.185, 0.02).cyl(0.002, 0.002, 0.018, 4).pop(); }
+    if (A.acc === 'bag') {
+      body.material('cloth').col('#6b4a2c').push().t(-0.053, 0.125, 0.006).box(0.024, 0.044, 0.05).pop();
+      body.col('#5a3c22').push().t(-0.053, 0.162, 0.006).box(0.026, 0.008, 0.052).pop();
+      body.col('#7b5636').tube([[0.046, 0.276, 0.004], [0.02, 0.255, 0.039], [-0.016, 0.205, 0.039], [-0.044, 0.165, 0.03]], 0.0045, 0.0045, 5);
+      body.tube([[0.046, 0.276, 0.004], [0.02, 0.26, -0.034], [-0.02, 0.21, -0.034], [-0.048, 0.168, -0.02]], 0.0045, 0.0045, 5);
+      body.col('#c46b3a').push().t(0, 0.288, 0.014).rx(-0.35).cone(0.022, 0.028, 8).pop();       // foulard
+    }
+    if (A.acc === 'stetho') {
+      body.material('plain').col('#2c3236');
+      body.tube([[-0.016, 0.292, 0.012], [-0.03, 0.27, 0.034], [-0.022, 0.235, 0.04], [-0.012, 0.215, 0.041]], 0.0033, 0.0033, 6);
+      body.tube([[0.016, 0.292, 0.012], [0.03, 0.27, 0.034], [0.022, 0.24, 0.04], [0.008, 0.222, 0.041]], 0.0033, 0.0033, 6);
+      body.material('metal').col('#b9bec2').push().t(-0.01, 0.21, 0.042).rx(1.4).cyl(0.007, 0.007, 0.003, 10, 'both').pop();
+    }
+    if (A.acc === 'bandana') {
+      body.material('cloth').col('#c8a14a').push().t(0, 0.289, 0.002).loft([{ p: [0, 0, 0], ry: 0.022, rz: 0.021 }, { p: [0, 0.008, 0], ry: 0.019, rz: 0.019 }], 12, { caps: false }).pop();
+      body.push().t(0, 0.282, 0.022).rx(-0.4).cone(0.016, 0.022, 6).pop();
+      // sac à dos
+      body.col('#7a5a36').push().t(0, 0.19, -0.04).box(0.06, 0.075, 0.03).pop();
+      body.col('#5f4528').push().t(0, 0.262, -0.041).sphere(0.03, 0.01, 0.016, 10, 4).pop();
+      body.col('#4b3a26'); for (const sx of [-1, 1]) body.tube([[sx * 0.026, 0.282, -0.012], [sx * 0.03, 0.27, 0.034], [sx * 0.03, 0.22, 0.037], [sx * 0.028, 0.19, 0.031]], 0.004, 0.004, 5);
+    }
+    if (A.acc === 'glasses') {
+      body.material('metal').col('#1f1f1f');
+      for (const sx of [-1, 1]) { body.push().t(sx * 0.0155, 0.343, 0.0445).rx(Math.PI / 2).cyl(0.0105, 0.0105, 0.002, 14, false).pop(); body.push().t(sx * 0.037, 0.345, 0.02).box(0.002, 0.002, 0.044).pop(); }
+      body.push().t(0, 0.345, 0.045).box(0.01, 0.0018, 0.0018).pop();
+      body.material('glass').col('#cfe2ea'); for (const sx of [-1, 1]) body.push().t(sx * 0.0155, 0.343, 0.0445).rx(Math.PI / 2).cyl(0.0098, 0.0098, 0.001, 14, 'both').pop();
+    }
+
+    /* ---- jambe (repère de la hanche, vers -y) ---- */
     const leg = new MB();
-    leg.material('cloth').col(A.bottom).push().t(0, -0.15, 0).cyl(0.021, 0.025, 0.15, 6).pop();
-    leg.material('plain').col('#3a2a1e').push().t(0, -0.153, 0.012).box(0.038, 0.026, 0.068).pop();
+    leg.material('cloth').col(bot).tube([[0, 0.004, 0], [0, -0.04, 0.002], [0, -0.075, 0.003], [0, -0.11, 0], [0, -0.132, -0.002]], f ? 0.0225 : 0.024, f ? 0.0135 : 0.0145, 10);
+    leg.col(shade(bot, 0.88)).push().t(0, -0.075, 0.019).sphere(0.008, 0.006, 0.004, 6, 3).pop(); // genou
+    if (A.cargo) leg.col(shade(bot, 0.85)).push().t(0, -0.05, 0).rz(0).t(0.021, 0, 0).box(0.006, 0.026, 0.02).pop();
+    // chaussure : tige, semelle, bout arrondi
+    leg.material('plain').col(shoe);
+    if (A.boots) leg.push().t(0, -0.138, -0.001).cyl(0.0165, 0.016, 0.03, 10).pop();
+    leg.push().t(0, -0.143, 0.004).sphere(0.0158, 0.012, 0.022, 10, 6).pop();
+    leg.push().t(0, -0.146, 0.022).sphere(0.0148, 0.0095, 0.018, 10, 6).pop();
+    leg.col(A.sole || '#1d1814').push().t(0, -0.155, 0.011).box(0.032, 0.005, 0.068).pop();
+    if (A.laces) leg.col('#f2efe6').push().t(0, -0.137, 0.022).rx(-0.6).box(0.012, 0.003, 0.014).pop();
+
     const arm = new MB();
-    arm.material('cloth').col(A.top).push().t(0, -0.115, 0).cyl(0.014, 0.017, 0.115, 6).pop();
-    arm.material('plain').col(A.skin).push().t(0, -0.124, 0).sphere(0.016, 0.016, 0.016, 6, 4).pop();
+    armInto(arm);
     // outils tenus dans la main droite (repère du bras : la main est en y = -0,124)
     const hammer = new MB();
-    hammer.material('wood').col('#8a6238').push().t(0, -0.124, 0).rx(Math.PI / 2).t(0, -0.01, 0).cyl(0.006, 0.006, 0.1, 5).pop();
-    hammer.material('metal').col('#7d8186').push().t(0, -0.124, 0.085).box(0.05, 0.022, 0.022).pop();
+    hammer.material('wood').col('#8a6238').push().t(0, -0.124, 0.012).rx(Math.PI / 2).t(0, -0.01, 0).cyl(0.0055, 0.0065, 0.1, 6).pop();
+    hammer.material('metal').col('#7d8186').push().t(0, -0.135, 0.095).box(0.05, 0.022, 0.022).pop();
+    hammer.col('#5e6266').push().t(0.022, -0.135, 0.095).box(0.012, 0.026, 0.026).pop();
     const kit = new MB();
-    kit.material('plain').col('#f2f2ee').push().t(0, -0.17, 0.01).box(0.06, 0.045, 0.03).pop();
-    kit.col('#c8372d').push().t(0, -0.15, 0.026).box(0.022, 0.008, 0.002).pop().push().t(0, -0.159, 0.026).box(0.008, 0.026, 0.002).pop();
+    kit.material('plain').col('#f2f2ee').push().t(0, -0.172, 0.014).box(0.062, 0.045, 0.032).pop();
+    kit.col('#dadad4').push().t(0, -0.13, 0.014).box(0.02, 0.006, 0.006).pop();
+    kit.col('#c8372d').push().t(0, -0.152, 0.031).box(0.022, 0.008, 0.002).pop().push().t(0, -0.161, 0.031).box(0.008, 0.026, 0.002).pop();
     const board = new MB();
-    board.material('wood').col('#9a7348').push().t(0, -0.13, 0.03).rx(-1.0).box(0.06, 0.004, 0.08).pop();
-    board.material('plain').col('#f4f1e6').push().t(0, -0.127, 0.031).rx(-1.0).box(0.05, 0.002, 0.065).pop();
+    board.material('wood').col('#9a7348').push().t(0, -0.13, 0.034).rx(-1.0).box(0.06, 0.004, 0.08).pop();
+    board.material('plain').col('#f4f1e6').push().t(0, -0.127, 0.035).rx(-1.0).box(0.05, 0.002, 0.065).pop();
+    board.material('metal').col('#9a9c9e').push().t(0, -0.104, 0.05).rx(-1.0).box(0.024, 0.006, 0.01).pop();
     return { body: body.finish(), leg: leg.finish(), arm: arm.finish(), hammer: hammer.finish(), kit: kit.finish(), board: board.finish(), sh };
   };
 

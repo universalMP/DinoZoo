@@ -1500,7 +1500,7 @@
         for (const w of this.works || []) {
           const sp = this.project(w.x, w.y, w.z);
           if (!sp || sp.x < -60 || sp.y < -30 || sp.x > W2 + 60 || sp.y > H2 + 30) continue;
-          const bw = 64, label = w.label ? `${w.label} · ${Math.round(w.p * 100)} %` : w.b.upg ? `⬆ Niv. ${w.b.level + 1} · ${Math.round(w.p * 100)} %` : `🚧 ${Math.round(w.p * 100)} %`;
+          const bw = 64, label = w.label ? `${DZ.L(w.label)} · ${Math.round(w.p * 100)} %` : w.b.upg ? `${DZ.L('⬆ Niv. {0}', w.b.level + 1)} · ${Math.round(w.p * 100)} %` : `🚧 ${Math.round(w.p * 100)} %`;
           o.fillStyle = 'rgba(20,24,18,0.72)'; this.rrect(o, sp.x - bw / 2 - 6, sp.y - 22, bw + 12, 30, 8); o.fill();
           o.fillStyle = 'rgba(255,255,255,0.15)'; this.rrect(o, sp.x - bw / 2, sp.y - 3, bw, 6, 3); o.fill();
           o.fillStyle = '#e6bb5c'; this.rrect(o, sp.x - bw / 2, sp.y - 3, Math.max(4, bw * w.p), 6, 3); o.fill();
@@ -1516,7 +1516,7 @@
           const sp = this.project(b.x + b.w / 2, this.world.buildingHeight(b) + 1.4, b.y + b.h / 2);
           if (!sp) continue;
           const mins = Math.max(1, Math.round(ph.left * 60));
-          const label = `🚁 ${DZ.SPECIES[dl.sp].short || DZ.SPECIES[dl.sp].name} · ${ph.phase === 'fly' ? 'en approche' : (mins >= 60 ? Math.floor(mins / 60) + ' h ' + String(mins % 60).padStart(2, '0') : mins + ' min')}`;
+          const label = `🚁 ${DZ.SPECIES[dl.sp].short || DZ.SPECIES[dl.sp].name} · ${ph.phase === 'fly' ? DZ.L('en approche') : (mins >= 60 ? Math.floor(mins / 60) + ' h ' + String(mins % 60).padStart(2, '0') : mins + ' min')}`;
           o.font = '600 11px "Trebuchet MS", sans-serif'; o.textAlign = 'center';
           const tw = o.measureText(label).width + 16;
           const yy = sp.y - (g.s.deliveries.indexOf(dl) % 3) * 22;
@@ -1540,7 +1540,7 @@
         if (!p.d.loose || p.d.tr) continue;
         const s2 = this.project(p.x, p.y + (p.h || 0.3) + 0.5, p.z);
         if (!s2) continue;
-        const txt = `🚨 ${p.d.name} en liberté`;
+        const txt = '🚨 ' + DZ.L('{0} en liberté', p.d.name);
         o.font = '700 12px "Trebuchet MS", sans-serif'; o.textAlign = 'center';
         const tw = o.measureText(txt).width + 18;
         o.fillStyle = `rgba(150,30,20,${0.82 + Math.sin(t * 6) * 0.1})`; this.rrect(o, s2.x - tw / 2, s2.y - 15, tw, 21, 10); o.fill();
@@ -1561,7 +1561,7 @@
       if (this.cam.dist < 26) for (const v of this.vetPos || []) {
         const s2 = this.project(v.x, v.head + 0.12, v.z);
         if (!s2) continue;
-        const label = '👩‍⚕️ Vétérinaire';
+        const label = '👩‍⚕️ ' + DZ.L('Vétérinaire');
         o.font = '600 11px "Trebuchet MS", sans-serif'; o.textAlign = 'center';
         const tw = o.measureText(label).width + 12;
         o.fillStyle = 'rgba(238,241,238,0.9)'; this.rrect(o, s2.x - tw / 2, s2.y - 13, tw, 18, 9); o.fill();
@@ -1622,8 +1622,8 @@
       const M = G.avatarMeshes(i, gender);
       const meshes = ['body', 'arm', 'leg', 'board'].reduce((o, k) => { o[k] = G.upload(this.gl, M[k]); return o; }, {});
       const c = this.renderThumb(w, h, (aspect) => {
-        const eye = [0.16, 0.3, 0.64];
-        const view = M4.lookAt(eye, [0, 0.215, 0], [0, 1, 0]);
+        const eye = [0.13, 0.3, 0.52];
+        const view = M4.lookAt(eye, [0, 0.22, 0], [0, 1, 0]);
         const vp = M4.mul(M4.persp(0.62 / Math.min(1, aspect), aspect, 0.05, 10), view);
         return { vp, eye, draw: (prog) => {
           const root = M4.create(); M4.rotY(root, 0.55);
